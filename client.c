@@ -199,14 +199,14 @@ int main(int argc, char **argv)
 		printf("用户已登录，请勿重复登陆！\n");
 		exit(-1);
 	}
-	else if(strcmp(buffer,"error3")==0)
-	{
-		printf("用户未注册，请先注册！\n");
-		exit(-1);
-	}
 	else if(strcmp(buffer,"error4")==0)
 	{
 		printf("账号已存在，请勿重复注册！\n");
+		exit(-1);
+	}
+	else if(strcmp(buffer,"error5")==0)
+	{
+		printf("聊天室人数已达上限，请稍后重试！\n");
 		exit(-1);
 	}
 	else

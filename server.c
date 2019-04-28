@@ -217,13 +217,6 @@ int main_main(int argc, char **argv)
             //exit(-1);//要continue还是exit，再考虑
 			continue;
         }
-		if(full_flag)
-		{
-			memset(buffer,0,SIZE);
-			strcpy(buffer,"error5");
-			send(conn,buffer,SIZE,0);
-			continue;
-		}
 		connfd[i]=conn;
 		
         printf("Accept successful!\n");
@@ -247,6 +240,14 @@ int main_main(int argc, char **argv)
 		recv(connfd[i],buffer,SIZE,0);
 		strcpy(pswd,buffer);
 		//printf("pswd:%s\n",pswd);
+		
+		if(full_flag)
+		{
+			memset(buffer,0,SIZE);
+			strcpy(buffer,"error5");
+			send(conn,buffer,SIZE,0);
+			continue;
+		}
 		
 		memset(buffer,0,SIZE);
 		int judge=0;
