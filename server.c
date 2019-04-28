@@ -105,7 +105,7 @@ void* pthread_handle(void * arg)
                     perror("send");
                     pthread_exit(0);
                 } 
-            }  
+            }
         }  
 
     }
@@ -159,6 +159,7 @@ int main_main(int argc, char **argv)
     //创建套接字描述符
     int listenfd = get_sockfd();
     //记录空闲的客户端的套接字描述符（-1为空闲）
+	int full_flag=0;//线程已满
 	
 	//读取用户注册信息
 	if((fp=fopen("log_in.ini","r"))==NULL)
@@ -202,14 +203,28 @@ int main_main(int argc, char **argv)
                 break;
             }
         }
+		if(i==LISTEN_MAX)
+			full_flag=1;
+		else
+			full_flag=0;
         printf("before accept i == %d\n",i);
         //服务器阻塞,直到客户程序建立连接
         sin_size=sizeof(struct sockaddr_in);
-        if((connfd[i]=accept(listenfd,(struct sockaddr *)(&client_addr),&sin_size))==-1)         
+		int conn;
+        if((conn=accept(listenfd,(struct sockaddr *)(&client_addr),&sin_size))==-1)         
         {
             perror("accept");
-            exit(-1);//要continue还是exit，再考虑
+            //exit(-1);//要continue还是exit，再考虑
+			continue;
         }
+		if(full_flag)
+		{
+			memset(buffer,0,SIZE);
+			strcpy(buffer,"error5");
+			send(conn,buffer,SIZE,0);
+			continue;
+		}
+		connfd[i]=conn;
 		
         printf("Accept successful!\n");
         printf("connect to client %d : %s:%d \n",num , inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
@@ -295,7 +310,7 @@ int main_main(int argc, char **argv)
 			}
 		}
 		send(connfd[i],buffer,SIZE,0);
-		if (judge != 2)
+		if (judge != 3)
 		{
 			connfd[i]=-1;
 			continue;
@@ -321,13 +336,18 @@ int main_main(int argc, char **argv)
         memset(buffer,0,SIZE);
         strcpy(buffer,"\n-------------------Welecom come to chat room----------------------\n");
 		strcat(buffer,"\n--------------Please enter Q to quit the chat room----------------\n");
-        //send(connfd[i],buffer,SIZE,0);
+        send(connfd[i],buffer,SIZE,0);
 
         //将加入的新客户发送给所有在线的客户端/
-        printf("before recv\n");
+        //printf("before recv\n");
         
-        printf("after recv\n");
-        strcat( name," enter chat...."); 
+        //printf("after recv\n");
+		memset(buffer,0,SIZE);
+		strcpy(buffer,name);
+        strcat( buffer," 加入聊天室....");
+		record_log=fopen("record.log","a+");
+		fprintf(record_log,"%s\n",buffer);
+		fclose(record_log);
         int j;
         for(j = 0; j < LISTEN_MAX; j++)
         {
