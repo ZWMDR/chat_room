@@ -243,20 +243,29 @@ int main_main(int argc, char **argv)
 					if(strcmp(pswd,USERS[k].pswd)==0)
 					{
 						judge=2;
-						strcpy(buffer,"OK");//登录成功
-						break;
+						if(USERS[i].log_status==0)
+						{
+							judge=3;
+							break;
+						}
 					}
-					strcpy(buffer,"error1");//密码错误
+					
 				}
 			}
 			if(judge==0)
-			{
 				strcpy(buffer,"error2");//无此用户信息，未注册
-			}
+			else if(judge==1)
+				strcpy(buffer,"error1");//密码错误
+			else if(judge==2)
+				strcpy(buffer,"error3");//重复登陆
+			else if(judge==3)
+				strcpy(buffer,"OK");//登录成功
+			else
+				strcpy(buffer,"ERROR");//未知错误
 		}
 		else
 		{
-			judge = 2;
+			judge = 3;
 			memset(buffer, 0, SIZE);
 			for (int k = 0; k < count; k++)
 			{
@@ -270,7 +279,7 @@ int main_main(int argc, char **argv)
 			{
 				strcpy(USERS[count].name, name);
 				strcpy(USERS[count].pswd, pswd);
-				USERS[count].log_status = 0;
+				USERS[count].log_status = 1;
 				count++;
 				fp = fopen("log_in.ini", "w");
 				fprintf(fp, "%d\n", count);
@@ -280,7 +289,7 @@ int main_main(int argc, char **argv)
 					fprintf(fp, "%s\n", USERS[k].pswd);
 				}
 				fclose(fp);
-				strcpy(buffer, "error3");
+				strcpy(buffer, "OK1");
 			}
 		}
 		send(connfd[i],buffer,SIZE,0);

@@ -194,9 +194,15 @@ int main(int argc, char **argv)
 		printf("用户未注册，请先注册！\n");
 		exit(-1);
 	}
+	else if(strcmp(buffer,"erroe3")==0)
+	{
+		printf("用户已登录，请勿重复登陆！\n");
+		exit(-1);
+	}
 	else if(strcmp(buffer,"error3")==0)
 	{
-		printf("注册成功，已自动登录！\n");
+		printf("用户未注册，请先注册！\n");
+		exit(-1);
 	}
 	else if(strcmp(buffer,"error4")==0)
 	{
@@ -205,7 +211,15 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		if(strcmp(buffer,"OK")!=0)
+		if(strcmp(buffer,"OK")==0)
+		{
+			printf("登录成功！\n");
+		}
+		else if(strcmp(buffer,"OK1")==0)
+		{
+			printf("注册成功！已自动登录\n");
+		}
+		else
 		{
 			printf("未知网络错误，请重试！\n");
 			exit(-1);
