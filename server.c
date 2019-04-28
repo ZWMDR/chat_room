@@ -90,8 +90,12 @@ void* pthread_handle(void * arg)
             connfd[index]=-1;
             pthread_exit(0);
         }
+		
+		record_log=fopen("record.log","a+");
         printf(" %s\n",buffer);
 		fprintf(record_log,"%s\n",buffer);
+		fclose(record_log);
+		
         for(i = 0; i < LISTEN_MAX ; i++)
         {
             if(connfd[i] != -1)
@@ -175,8 +179,6 @@ int main_main(int argc, char **argv)
 	}
 	fclose(fp);
 	
-	log_in_log=fopen("log_in.log","a+");
-	record_log=fopen("record.log","a+");
 	//密码及用户
     for(i = 0 ; i < LISTEN_MAX; i++)  
     {  
@@ -310,9 +312,10 @@ int main_main(int argc, char **argv)
         strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S ", p_curtime);
 		strcat(buffer,"username:");
 		strcat(buffer,name);
-		strcat(buffer,"\n");
-		fprintf(log_in_log,"%s",buffer);
 		
+		log_in_log=fopen("log_in.log","a+");
+		fprintf(log_in_log,"%s\n",buffer);
+		fclose(log_in_log);
 		
         //把界面发送给客户端
         memset(buffer,0,SIZE);
@@ -343,8 +346,6 @@ int main_main(int argc, char **argv)
 			exit(-1);
 		}
    }
-   fclose(log_in_log);
-   fclose(record_log);
    return 0;
 }
 
