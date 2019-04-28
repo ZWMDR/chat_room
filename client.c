@@ -49,19 +49,25 @@ void* pthread_send(void * arg)
     {
         memset(buf,0,SIZE);
         fgets(buf,SIZE,stdin);//获取用户输入的信息
-        memset(buffer,0,SIZE);
+		/*
         time(&timep);
         p_curtime = localtime(&timep);
         strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S", p_curtime);
-        /*输出时间和客户端的名字*/
+        //输出时间和客户端的名字
         strcat(buffer," \n昵称 ->");
         strcat(buffer,name);
         strcat(buffer,":\n\t");
+		*/
 
         /*对客户端程序进行管理*/
+		memset(buffer,0,SIZE);
         if(strncmp("Q",buf,1)==0)
         {
             printf("该客户端下线...\n");
+			strcat(buffer,"EXIT");
+			send(sockfd,buffer,SIZE,0);
+			recv(sockfd,buffer,SIZE,0);
+			memset(buffer,0,SIZE);
             strcat(buffer,"退出聊天室！");
             if((send(sockfd,buffer,SIZE,0)) <= 0)
             {
@@ -73,8 +79,13 @@ void* pthread_send(void * arg)
         }
         else
         {
+			strcat(buffer,"SEND");
+			send(sockfd,buffer,SIZE,0);
+			recv(sockfd,buffer,SIZE,0);
+			
+			memset(buffer,0,SIZE);
             strncat(buffer,buf,strlen(buf)-1);
-            strcat(buffer,"\n");
+            //strcat(buffer,"\n");
             if((send(sockfd,buffer,SIZE,0)) <= 0)
             {
                  perror("send");

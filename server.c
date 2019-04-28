@@ -31,7 +31,15 @@ typedef struct users_info
 	char pswd[64];
 	int log_status;
 } users_info;
+typedef struct i_index
+{
+	int init;
+	int i;
+	int k;
+} i_index;
 
+users_info* USERS;
+i_index* INDEX;
 //套接字描述符
 int get_sockfd()
 {
@@ -46,7 +54,7 @@ int get_sockfd()
     bzero(&server_addr,sizeof(struct sockaddr_in)); 
     server_addr.sin_family=AF_INET;                
     server_addr.sin_addr.s_addr=htonl(INADDR_ANY); 
-    server_addr.sin_port=htons(PORT);  
+    server_addr.sin_port=htons(PORT);
 
     // 设置套接字选项避免地址使用错误，为了允许地址重用，我设置整型参数（on）为 1 （不然，可以设为 0 来禁止地址重用）
     int on=1;
@@ -86,6 +94,7 @@ void* pthread_handle(void * arg)
         if((recv(connfd[index],buffer,SIZE,0)) <= 0)
         {
 			//printf("pthread%d exit\n",index);
+			USERS[i].log_status=0;
             close(connfd[index]);
             connfd[index]=-1;
             pthread_exit(0);
@@ -140,7 +149,6 @@ int main_main(int argc, char **argv)
     pid_t ppid,pid;
 	FILE* fp;
 	FILE* log_in_log;
-	users_info* USERS;
 	
 	char construction[10];
 	char name[32];
@@ -152,6 +160,7 @@ int main_main(int argc, char **argv)
 	memset(pswd,0,64);
 
     int num = 0,i = 0,ret;
+	int k=0;
     //线程标识号
     pthread_t thread_server_close,thread_handle;
     //unsigned char buffer[SIZE];
@@ -168,7 +177,15 @@ int main_main(int argc, char **argv)
 	}
 	int count;
 	fscanf(fp,"%d\n",&count);
+	
 	USERS=(users_info*)malloc(LISTEN_MAX*sizeof(users_info));
+	INDEX=(i_index*)malloc(LISTEN_MAX*sizeof(i_index));
+	for(int m=0;m<LISTEN_MAX;m++)
+	{
+		INDEX[m].init==0;
+		INDEX[m].i=0;
+		INDEX[m].k=0;
+	}
 	for(int k=0;k<count;k++)
 	{
 		char name[32],pswd[64];
@@ -182,7 +199,7 @@ int main_main(int argc, char **argv)
 	
 	//密码及用户
     for(i = 0 ; i < LISTEN_MAX; i++)  
-    {  
+    {
         connfd[i]=-1;
     }
 
@@ -217,8 +234,6 @@ int main_main(int argc, char **argv)
             //exit(-1);//要continue还是exit，再考虑
 			continue;
         }
-		connfd[i]=conn;
-		
         printf("Accept successful!\n");
         printf("connect to client %d : %s:%d \n",num , inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 		
@@ -246,14 +261,17 @@ int main_main(int argc, char **argv)
 			memset(buffer,0,SIZE);
 			strcpy(buffer,"error5");
 			send(conn,buffer,SIZE,0);
+			close(conn);
 			continue;
 		}
+		else
+			connfd[i]=conn;
 		
 		memset(buffer,0,SIZE);
 		int judge=0;
 		if(strcmp(construction,"log_in")==0)
 		{
-			for(int k=0;k<count;k++)
+			for(k=0;k<count;k++)
 			{
 				if(strcmp(name,USERS[k].name)==0)
 				{
@@ -261,8 +279,12 @@ int main_main(int argc, char **argv)
 					if(strcmp(pswd,USERS[k].pswd)==0)
 					{
 						judge=2;
-						if(USERS[i].log_status==0)
+						if(USERS[k].log_status==0)
 						{
+							USERS[k].log_status=1;
+							INDEX[i].init=1;
+							INDEX[i].i=i;
+							INDEX[i].k=k;
 							judge=3;
 							break;
 						}
@@ -285,7 +307,7 @@ int main_main(int argc, char **argv)
 		{
 			judge = 3;
 			memset(buffer, 0, SIZE);
-			for (int k = 0; k < count; k++)
+			for (k = 0; k < count; k++)
 			{
 				if (strcmp(name, USERS[k].name) == 0)
 				{
@@ -301,7 +323,7 @@ int main_main(int argc, char **argv)
 				count++;
 				fp = fopen("log_in.ini", "w");
 				fprintf(fp, "%d\n", count);
-				for (int k = 0; k < count; k++)
+				for (k = 0; k < count; k++)
 				{
 					fprintf(fp, "%s\n", USERS[k].name);
 					fprintf(fp, "%s\n", USERS[k].pswd);
@@ -321,13 +343,14 @@ int main_main(int argc, char **argv)
 		if(strcmp(buffer,"OK")!=0)
 			continue;
 		
-		
 		memset(buffer,0,SIZE);
 		time(&timep);
         p_curtime = localtime(&timep);
         strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S ", p_curtime);
 		strcat(buffer,"username:");
 		strcat(buffer,name);
+		strcat(buffer," from IP:");
+		strcat(buffer,inet_ntoa(client_addr.sin_addr));
 		
 		log_in_log=fopen("log_in.log","a+");
 		fprintf(log_in_log,"%s\n",buffer);
@@ -335,8 +358,8 @@ int main_main(int argc, char **argv)
 		
         //把界面发送给客户端
         memset(buffer,0,SIZE);
-        strcpy(buffer,"\n-------------------Welecom come to chat room----------------------\n");
-		strcat(buffer,"\n--------------Please enter Q to quit the chat room----------------\n");
+        strcpy(buffer,"\n--------------------欢迎来到电子垃圾聊天室-----------------------\n");
+		strcat(buffer,"\n----------------------输入“Q”退出聊天室--------------------------\n");
         send(connfd[i],buffer,SIZE,0);
 
         //将加入的新客户发送给所有在线的客户端/
