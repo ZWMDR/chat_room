@@ -34,7 +34,6 @@ typedef struct users_info
 typedef struct i_index
 {
 	int init;
-	int i;
 	int k;
 } i_index;
 
@@ -85,13 +84,31 @@ void* pthread_handle(void * arg)
 {
     int index,i;
     index = *(int *)arg;
+	int k=INDEX[index].k;
     printf("in pthread_recv,index = %d,connfd = %d\n",index,connfd[index]);
     char buffer[SIZE];
+	char buff[SIZE];
     while(1)
     {
         //用于接收信息
         memset(buffer,0,SIZE);
-        if((recv(connfd[index],buffer,SIZE,0)) <= 0)
+		memset(buff,0,SIZE);
+        if((recv(connfd[index],buff,SIZE,0)) <= 0)
+        {
+			USERS[i].log_status=0;
+            close(connfd[index]);
+            connfd[index]=-1;
+            pthread_exit(0);
+        }
+		send(connfd[index],buff,SIZE,0);
+		if(strcmp(buff,"EXIT")==0)
+		{
+			USERS[i].log_status=0;
+            close(connfd[index]);
+            connfd[index]=-1;
+            pthread_exit(0);
+		}
+		if((recv(connfd[index],buff,SIZE,0)) <= 0)
         {
 			//printf("pthread%d exit\n",index);
 			USERS[i].log_status=0;
@@ -99,9 +116,18 @@ void* pthread_handle(void * arg)
             connfd[index]=-1;
             pthread_exit(0);
         }
+		memset(buff,0,SIZE);
+		recv(connfd[index],buff,SIZE,0);
+		
+		time(&timep);
+        p_curtime = localtime(&timep);
+        strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+		strcat(buffer,USERS[INDEX[index].k].name);
+		strcat(buffer,":\n\t");
+		strcat(buffer,buff);
+		printf(" %s\n",buffer);
 		
 		record_log=fopen("record.log","a+");
-        printf(" %s\n",buffer);
 		fprintf(record_log,"%s\n",buffer);
 		fclose(record_log);
 		
@@ -183,7 +209,6 @@ int main_main(int argc, char **argv)
 	for(int m=0;m<LISTEN_MAX;m++)
 	{
 		INDEX[m].init==0;
-		INDEX[m].i=0;
 		INDEX[m].k=0;
 	}
 	for(int k=0;k<count;k++)
@@ -283,7 +308,6 @@ int main_main(int argc, char **argv)
 						{
 							USERS[k].log_status=1;
 							INDEX[i].init=1;
-							INDEX[i].i=i;
 							INDEX[i].k=k;
 							judge=3;
 							break;
@@ -320,6 +344,9 @@ int main_main(int argc, char **argv)
 				strcpy(USERS[count].name, name);
 				strcpy(USERS[count].pswd, pswd);
 				USERS[count].log_status = 1;
+				USERS[k].log_status=1;
+				INDEX[i].init=1;
+				INDEX[i].k=count;
 				count++;
 				fp = fopen("log_in.ini", "w");
 				fprintf(fp, "%d\n", count);
@@ -440,8 +467,6 @@ void mydaemon(int ischdir, int isclose, int argc, char** argv)
 int main(int argc, char* argv[])
 {
 	mydaemon(1, 1, argc, argv);
-
 	while (1);
-
 	exit(EXIT_SUCCESS);
 }
