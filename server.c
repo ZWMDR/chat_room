@@ -346,8 +346,8 @@ int main_main(int argc, char **argv)
 		
         //把界面发送给客户端
         memset(buffer,0,SIZE);
-        strcpy(buffer,"\n-------------------Welecom come to chat room----------------------\n");
-		strcat(buffer,"\n--------------Please enter Q to quit the chat room----------------\n");
+        strcpy(buffer,"\n--------------------欢迎来到电子垃圾聊天室------------------------\n");
+		strcat(buffer,"\n----------------------输入“Q”退出聊天室---------------------------\n");
         send(connfd[i],buffer,SIZE,0);
 
         //将加入的新客户发送给所有在线的客户端/
