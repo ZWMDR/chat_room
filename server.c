@@ -17,7 +17,7 @@
 #define PORT 1778
 #define SIZE 1024
 #define SIZE_SHMADD 2048
-#define LISTEN_MAX 50
+#define LISTEN_MAX 100
 
 int listenfd;
 int connfd[LISTEN_MAX];
@@ -31,6 +31,8 @@ typedef struct users_info
 	char pswd[64];
 	int log_status;
 } users_info;
+
+users_info* USERS;
 
 //套接字描述符
 int get_sockfd()
@@ -75,8 +77,11 @@ int get_sockfd()
 
 void* pthread_handle(void * arg)
 {
-    int index,i;
-    index = *(int *)arg;
+    unsigned int index;
+	int i,k;
+    index = *(unsigned int *)arg;
+	k=(int)0x0000FFFF&index;//该用户在用户信息数据库中的序号
+	index=(0xFFFF0000&index)>>16;//该用户的线程序号
     printf("in pthread_recv,index = %d,connfd = %d\n",index,connfd[index]);
     char buffer[SIZE];
     while(1)
@@ -85,9 +90,9 @@ void* pthread_handle(void * arg)
         memset(buffer,0,SIZE);
         if((recv(connfd[index],buffer,SIZE,0)) <= 0)
         {
-			//printf("pthread%d exit\n",index);
             close(connfd[index]);
             connfd[index]=-1;
+			USERS[k].log_status=0;
             pthread_exit(0);
         }
 		
@@ -140,12 +145,13 @@ int main_main(int argc, char **argv)
     pid_t ppid,pid;
 	FILE* fp;
 	FILE* log_in_log;
-	users_info* USERS;
 	
 	char construction[10];
 	char name[32];
 	char pswd[64];
 	char* flag;
+	
+	USERS=(users_info*)malloc(LISTEN_MAX*sizeof(users_info));
 	
 	memset(construction,0,10);
 	memset(name,0,32);
@@ -168,7 +174,6 @@ int main_main(int argc, char **argv)
 	}
 	int count;
 	fscanf(fp,"%d\n",&count);
-	USERS=(users_info*)malloc(LISTEN_MAX*sizeof(users_info));
 	for(int k=0;k<count;k++)
 	{
 		char name[32],pswd[64];
@@ -195,6 +200,7 @@ int main_main(int argc, char **argv)
     }
     while(1)
     {
+		int user_id;
         for(i=0;i < LISTEN_MAX;i++)
         {
             printf("i == %d\n",i);
@@ -261,8 +267,10 @@ int main_main(int argc, char **argv)
 					if(strcmp(pswd,USERS[k].pswd)==0)
 					{
 						judge=2;
-						if(USERS[i].log_status==0)
+						if(USERS[k].log_status==0)
 						{
+							USERS[k].log_status=1;
+							user_id=k;
 							judge=3;
 							break;
 						}
@@ -298,6 +306,7 @@ int main_main(int argc, char **argv)
 				strcpy(USERS[count].name, name);
 				strcpy(USERS[count].pswd, pswd);
 				USERS[count].log_status = 1;
+				user_id=count;
 				count++;
 				fp = fopen("log_in.ini", "w");
 				fprintf(fp, "%d\n", count);
@@ -325,9 +334,11 @@ int main_main(int argc, char **argv)
 		memset(buffer,0,SIZE);
 		time(&timep);
         p_curtime = localtime(&timep);
-        strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S ", p_curtime);
+        strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S: ", p_curtime);
 		strcat(buffer,"username:");
 		strcat(buffer,name);
+		strcat(buffer," from IP: ");
+		strcat(buffer,inet_ntoa(client_addr.sin_addr));
 		
 		log_in_log=fopen("log_in.log","a+");
 		fprintf(log_in_log,"%s\n",buffer);
@@ -358,7 +369,9 @@ int main_main(int argc, char **argv)
                 send(connfd[j],buffer,strlen(buffer),0);
             }
         }
-        int socked_index = i;//这里避免线程还未创建完成，i的值可能会被while循环修改
+		unsigned int socked_index=i;
+		socked_index=socked_index<<16 | (unsigned int)user_id;
+        //int socked_index = i;//这里避免线程还未创建完成，i的值可能会被while循环修改
         //创建线程行读写操作
         ret = pthread_create(&thread_handle, NULL, pthread_handle, &socked_index);
 		if(ret != 0)
