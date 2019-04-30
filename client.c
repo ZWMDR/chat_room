@@ -13,7 +13,7 @@
 
 #define SIZE 1024
 #define SEND_SIZE 106
-#define SERV_PORT        1778
+#define SERV_PORT 1778
 char name[32];
 char pswd[64];
 

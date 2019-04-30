@@ -55,7 +55,7 @@ int get_sockfd()
     if((setsockopt(listenfd,SOL_SOCKET,SO_REUSEADDR,&on,sizeof(on)))<0)  
     {  
         perror("setsockopt failed");  
-        exit(-1);  
+        exit(-1);
     }
 
     //绑定服务器的ip和服务器端口号
@@ -232,20 +232,22 @@ int main_main(int argc, char **argv)
 		memset(buffer,0,SIZE);
 		recv(connfd[i],buffer,SIZE,0);
 		strcpy(construction,buffer);
+		memset(buffer,0,SIZE);
 		strcpy(buffer,"OK");
 		send(connfd[i],buffer,SIZE,0);
 		
 		memset(buffer,0,SIZE);
 		recv(connfd[i],buffer,SIZE,0);
 		strcpy(name,buffer);
+		memset(buffer,0,SIZE);
 		strcpy(buffer,"OK");
 		send(connfd[i],buffer,SIZE,0);
-		//printf("name:%s\n",name);
+		printf("\nname:%s\n",name);
 		
 		memset(buffer,0,SIZE);
 		recv(connfd[i],buffer,SIZE,0);
 		strcpy(pswd,buffer);
-		//printf("pswd:%s\n",pswd);
+		printf("pswd:%s\n",pswd);
 		
 		if(full_flag)
 		{
