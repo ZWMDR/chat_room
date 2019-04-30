@@ -99,10 +99,10 @@ void* pthread_handle(void * arg)
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,"系统消息:\n\t");
 			strcat(buff,USERS[k].name);
-			strcat(buff,"已退出聊天室");
+			strcat(buff,"已退出聊天室\n");
 			printf("%s\n",buff);
 			
 			record_log=fopen("record.log","a+");
@@ -120,7 +120,6 @@ void* pthread_handle(void * arg)
 					}
 				}
 			}  
-			
             pthread_exit(0);
         }
 		if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
@@ -128,10 +127,10 @@ void* pthread_handle(void * arg)
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,"系统消息:\n\t");
 			strcat(buff,USERS[k].name);
-			strcat(buff,"已退出聊天室");
+			strcat(buff,"已退出聊天室\n");
 			
 			close(connfd[i]);
 			USERS[k].log_status=0;
@@ -143,10 +142,11 @@ void* pthread_handle(void * arg)
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,USERS[k].name);
-			strcat(buff,":\n\t");
+			strcat(buff,":\n");
 			strcat(buff,buffer);
+			strcat(buff,"\n");
 		}
 		
 		record_log=fopen("record.log","a+");
@@ -187,7 +187,7 @@ void quit()
                 {
                     close(connfd[i]); 
                 }  
-            }       
+            }
             exit(0);  
         }  
     }  
@@ -295,12 +295,12 @@ int main_main(int argc, char **argv)
 		memset(buffer,0,SIZE);
 		strcpy(buffer,"OK");
 		send(connfd[i],buffer,SIZE,0);
-		printf("\nname:%s\n",name);
+		//printf("\nname:%s\n",name);
 		
 		memset(buffer,0,SIZE);
 		recv(connfd[i],buffer,SIZE,0);
 		strcpy(pswd,buffer);
-		printf("pswd:%s\n",pswd);
+		//printf("pswd:%s\n",pswd);
 		
 		if(full_flag)
 		{

@@ -65,7 +65,6 @@ void* pthread_send(void * arg)
         }
         else
         {
-			printf("send");
             strncat(buffer,buf,strlen(buf)-1);
             if((send(sockfd,buffer,SIZE,0)) <= 0)
             {
