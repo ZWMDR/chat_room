@@ -42,27 +42,19 @@ void* pthread_send(void * arg)
     //时间函数
     char buffer[SIZE],buf[SIZE];
     int sockfd = *(int *)arg;
-    struct tm *p_curtime;
-    time_t timep;
 
     while(1)
     {
         memset(buf,0,SIZE);
         fgets(buf,SIZE,stdin);//获取用户输入的信息
         memset(buffer,0,SIZE);
-        time(&timep);
-        p_curtime = localtime(&timep);
-        strftime(buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S", p_curtime);
         /*输出时间和客户端的名字*/
-        strcat(buffer," \n昵称 ->");
-        strcat(buffer,name);
-        strcat(buffer,":\n\t");
 
         /*对客户端程序进行管理*/
         if(strncmp("Q",buf,1)==0)
         {
             printf("该客户端下线...\n");
-            strcat(buffer,"退出聊天室！");
+            strcpy(buffer,"SYS_SIGNAL_QUIT");
             if((send(sockfd,buffer,SIZE,0)) <= 0)
             {
                 perror("error send");
@@ -73,8 +65,8 @@ void* pthread_send(void * arg)
         }
         else
         {
+			printf("send");
             strncat(buffer,buf,strlen(buf)-1);
-            strcat(buffer,"\n");
             if((send(sockfd,buffer,SIZE,0)) <= 0)
             {
                  perror("send");

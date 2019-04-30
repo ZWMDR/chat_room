@@ -22,6 +22,7 @@
 int listenfd;
 int connfd[LISTEN_MAX];
 FILE* record_log;
+FILE* log_in_log;
 struct tm *p_curtime;
 time_t timep;
 
@@ -79,11 +80,13 @@ void* pthread_handle(void * arg)
 {
     unsigned int index;
 	int i,k;
+	int log_out_flag=0;
     index = *(unsigned int *)arg;
-	k=(int)0x0000FFFF&index;//该用户在用户信息数据库中的序号
+	k=0x0000FFFF&index;//该用户在用户信息数据库中的序号
 	index=(0xFFFF0000&index)>>16;//该用户的线程序号
     printf("in pthread_recv,index = %d,connfd = %d\n",index,connfd[index]);
     char buffer[SIZE];
+	char buff[SIZE];
     while(1)
     {
         //用于接收信息
@@ -95,23 +98,50 @@ void* pthread_handle(void * arg)
 			USERS[k].log_status=0;
             pthread_exit(0);
         }
+		if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
+		{
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strcat(buff,"系统消息:\n\t");
+			strcat(buff,USERS[k].name);
+			strcat(buff,"已退出聊天室");
+			printf("%s\n",buff);
+			
+			close(connfd[i]);
+			USERS[k].log_status=0;
+			connfd[index]=-1;
+			log_out_flag=1;
+		}
+		else//用户发送消息
+		{
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strcat(buff,USERS[k].name);
+			strcat(buff,":\n\t");
+			strcat(buff,buffer);
+		}
 		
 		record_log=fopen("record.log","a+");
-        printf(" %s\n",buffer);
-		fprintf(record_log,"%s\n",buffer);
+        printf(" %s\n",buff);
+		fprintf(record_log,"%s\n",buff);
 		fclose(record_log);
 		
         for(i = 0; i < LISTEN_MAX ; i++)
         {
             if(connfd[i] != -1)
             {
-                if(send(connfd[i],buffer,strlen(buffer),0) == -1)
+                if(send(connfd[i],buff,SIZE,0) == -1)
                 {
-                    perror("send");
-                    pthread_exit(0);
-                } 
+                    connfd[i]=-1;
+                }
             }
         }  
+		if(log_out_flag)
+			pthread_exit(0);
 
     }
 }
@@ -144,7 +174,6 @@ int main_main(int argc, char **argv)
     int sin_size;
     pid_t ppid,pid;
 	FILE* fp;
-	FILE* log_in_log;
 	
 	char construction[10];
 	char name[32];
