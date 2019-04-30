@@ -96,6 +96,31 @@ void* pthread_handle(void * arg)
             close(connfd[index]);
             connfd[index]=-1;
 			USERS[k].log_status=0;
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strcat(buff,"系统消息:\n\t");
+			strcat(buff,USERS[k].name);
+			strcat(buff,"已退出聊天室");
+			printf("%s\n",buff);
+			
+			record_log=fopen("record.log","a+");
+			printf(" %s\n",buff);
+			fprintf(record_log,"%s\n",buff);
+			fclose(record_log);
+			
+			for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				if(connfd[i] != -1)
+				{
+					if(send(connfd[i],buff,SIZE,0) == -1)
+					{
+						connfd[i]=-1;
+					}
+				}
+			}  
+			
             pthread_exit(0);
         }
 		if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
@@ -107,7 +132,6 @@ void* pthread_handle(void * arg)
 			strcat(buff,"系统消息:\n\t");
 			strcat(buff,USERS[k].name);
 			strcat(buff,"已退出聊天室");
-			printf("%s\n",buff);
 			
 			close(connfd[i]);
 			USERS[k].log_status=0;
@@ -139,7 +163,7 @@ void* pthread_handle(void * arg)
                     connfd[i]=-1;
                 }
             }
-        }  
+        }
 		if(log_out_flag)
 			pthread_exit(0);
 
