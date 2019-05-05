@@ -89,6 +89,7 @@ void* pthread_handle(void * arg)
     printf("in pthread_recv,index = %d,connfd = %d\n",index,connfd[index]);
     char buffer[SIZE];
 	char buff[SIZE];
+	char time_ch[SIZE];
     while(1)
     {
         //用于接收信息
@@ -127,13 +128,22 @@ void* pthread_handle(void * arg)
 		}
 		else//用户发送消息
 		{
+			int counts=0;
+			for(int ss=0;ss<LISTEN_MAX;ss++)
+				if(USERS[ss].log_status)
+					counts++;
+			
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",counts);
+			
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,USERS[k].name);
 			strcat(buff,":\n\t");
 			strcat(buff,buffer);
+			strcat(time_ch,buff);
 		}
 		
 		record_log=fopen("record.log","a+");
@@ -141,32 +151,21 @@ void* pthread_handle(void * arg)
 		fprintf(record_log,"%s\n",buff);
 		fclose(record_log);
 		
-		/*
-		for(int m=0;m<LISTEN_MAX;m++)
-		{
-			if(USERS[m].log_status)
-				online_count++;
-		}
-		memset(buffer,0,SIZE);
-		stpcpy(buffer,"SYS_SIGNAL_ONLINE_COUNT:");
-		sprintf(buffer,"%3d",online_count);
-		send(connfd[i],buffer,SIZE,0);
-		*/
-		
         for(i = 0; i < LISTEN_MAX ; i++)
         {
             if(connfd[i] != -1)
             {
-                if(send(connfd[i],buff,SIZE,0) == -1)
+                if(send(connfd[i],time_ch,SIZE,0) == -1)
                 {
                     connfd[i]=-1;
                 }
-				//send(connfd[i],buffer,SIZE,0);
-				//recv(connfd[i],buffer,SIZE,0);
             }
         }
 		if(log_out_flag)
+		{
 			pthread_exit(0);
+			//online_count--;
+		}
 
     }
 }
@@ -191,8 +190,8 @@ void quit()
             }
             exit(0);  
         }  
-    }  
-}  
+    }
+}
 int main_main(int argc, char **argv)
 {
     struct sockaddr_in client_addr;
@@ -418,11 +417,17 @@ int main_main(int argc, char **argv)
 		*/
 		
         //把界面发送给客户端
+		int counts=0;
+		for(int ss=0;ss<LISTEN_MAX;ss++)
+			if(USERS[ss].log_status)
+				counts++;
+		
         memset(buffer,0,SIZE);
-        strcpy(buffer,"\n--------------------欢迎来到电子垃圾聊天室------------------------\n");
-		strcat(buffer,"\n----------------------输入“Q”退出聊天室---------------------------\n");
+		sprintf(buffer,"SYS_SIGNAL_ONLINE_COUNT:%03d ",counts);
+        strcat(buffer,"\n------------------------欢迎来到电子垃圾聊天室----------------------------\n");
+		strcat(buffer,"\n--------------------------输入“Q”退出聊天室-------------------------------\n");
         send(connfd[i],buffer,SIZE,0);
-
+		
         //将加入的新客户发送给所有在线的客户端/
         //printf("before recv\n");
         
@@ -433,6 +438,8 @@ int main_main(int argc, char **argv)
 		record_log=fopen("record.log","a+");
 		fprintf(record_log,"%s\n",buffer);
 		fclose(record_log);
+		
+		online_count++;
         int j;
         for(j = 0; j < LISTEN_MAX; j++)
         {
