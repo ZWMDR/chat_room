@@ -12,6 +12,7 @@
 #include<sys/shm.h>
 #include<time.h>
 #include<pthread.h>
+#include<stdlib.h>
 #include <arpa/inet.h>
 
 #define PORT 1778
@@ -21,6 +22,7 @@
 
 int listenfd;
 int connfd[LISTEN_MAX];
+int online_count;
 FILE* record_log;
 FILE* log_in_log;
 struct tm *p_curtime;
@@ -93,17 +95,26 @@ void* pthread_handle(void * arg)
         memset(buffer,0,SIZE);
         if((recv(connfd[index],buffer,SIZE,0)) <= 0)
         {
-            close(connfd[index]);
-            connfd[index]=-1;
+            memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,"系统消息:\n\t");
+			strcat(buff,USERS[k].name);
+			strcat(buff,"已退出聊天室");
+			printf("%s\n",buff);
+			
+			close(connfd[i]);
 			USERS[k].log_status=0;
-            pthread_exit(0);
+			connfd[index]=-1;
+			log_out_flag=1;
         }
 		if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
 		{
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,"系统消息:\n\t");
 			strcat(buff,USERS[k].name);
 			strcat(buff,"已退出聊天室");
@@ -119,7 +130,7 @@ void* pthread_handle(void * arg)
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n\t", p_curtime);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,USERS[k].name);
 			strcat(buff,":\n\t");
 			strcat(buff,buffer);
@@ -130,6 +141,18 @@ void* pthread_handle(void * arg)
 		fprintf(record_log,"%s\n",buff);
 		fclose(record_log);
 		
+		/*
+		for(int m=0;m<LISTEN_MAX;m++)
+		{
+			if(USERS[m].log_status)
+				online_count++;
+		}
+		memset(buffer,0,SIZE);
+		stpcpy(buffer,"SYS_SIGNAL_ONLINE_COUNT:");
+		sprintf(buffer,"%3d",online_count);
+		send(connfd[i],buffer,SIZE,0);
+		*/
+		
         for(i = 0; i < LISTEN_MAX ; i++)
         {
             if(connfd[i] != -1)
@@ -138,8 +161,10 @@ void* pthread_handle(void * arg)
                 {
                     connfd[i]=-1;
                 }
+				//send(connfd[i],buffer,SIZE,0);
+				//recv(connfd[i],buffer,SIZE,0);
             }
-        }  
+        }
 		if(log_out_flag)
 			pthread_exit(0);
 
@@ -162,8 +187,8 @@ void quit()
                 if(connfd[i] != -1)  
                 {
                     close(connfd[i]); 
-                }  
-            }       
+                }
+            }
             exit(0);  
         }  
     }  
@@ -186,6 +211,7 @@ int main_main(int argc, char **argv)
 	memset(name,0,32);
 	memset(pswd,0,64);
 
+	online_count=0;
     int num = 0,i = 0,ret;
     //线程标识号
     pthread_t thread_server_close,thread_handle;
@@ -252,29 +278,29 @@ int main_main(int argc, char **argv)
             //exit(-1);//要continue还是exit，再考虑
 			continue;
         }
-		connfd[i]=conn;
+		
 		
         printf("Accept successful!\n");
         printf("connect to client %d : %s:%d \n",num , inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 		
 		//解析用户信息
 		memset(buffer,0,SIZE);
-		recv(connfd[i],buffer,SIZE,0);
+		recv(conn,buffer,SIZE,0);
 		strcpy(construction,buffer);
 		memset(buffer,0,SIZE);
 		strcpy(buffer,"OK");
-		send(connfd[i],buffer,SIZE,0);
+		send(conn,buffer,SIZE,0);
 		
 		memset(buffer,0,SIZE);
-		recv(connfd[i],buffer,SIZE,0);
+		recv(conn,buffer,SIZE,0);
 		strcpy(name,buffer);
 		memset(buffer,0,SIZE);
 		strcpy(buffer,"OK");
-		send(connfd[i],buffer,SIZE,0);
+		send(conn,buffer,SIZE,0);
 		printf("\nname:%s\n",name);
 		
 		memset(buffer,0,SIZE);
-		recv(connfd[i],buffer,SIZE,0);
+		recv(conn,buffer,SIZE,0);
 		strcpy(pswd,buffer);
 		printf("pswd:%s\n",pswd);
 		
@@ -285,6 +311,7 @@ int main_main(int argc, char **argv)
 			send(conn,buffer,SIZE,0);
 			continue;
 		}
+		connfd[i]=conn;
 		
 		memset(buffer,0,SIZE);
 		int judge=0;
@@ -374,6 +401,21 @@ int main_main(int argc, char **argv)
 		log_in_log=fopen("log_in.log","a+");
 		fprintf(log_in_log,"%s\n",buffer);
 		fclose(log_in_log);
+		
+		/*
+		online_count=0;
+		for(int m=0;m<LISTEN_MAX;m++)
+		{
+			if(USERS[m].log_status)
+				online_count++;
+		}
+		memset(buffer,0,SIZE);
+		stpcpy(buffer,"SYS_SIGNAL_ONLINE_COUNT:");
+		sprintf(buffer,"%3d",online_count);
+		printf("%s\n",buffer);
+		send(connfd[i],buffer,SIZE,0);
+		recv(connfd[i],buffer,SIZE,0);
+		*/
 		
         //把界面发送给客户端
         memset(buffer,0,SIZE);
