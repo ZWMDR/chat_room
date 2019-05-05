@@ -8,6 +8,7 @@
         - 账号：ZWMDR，密码：zwmdr
         - 账号：ZCCNB，密码：zccnb
         - 账号：CYXNB，密码：cyxnb
+        - 账号：Test，密码：test
         - **账号也可任意注册**
 - 工程包含makefile文件，可直接通过makefile文件编译client与server两个程序
     - makefile文件已包含预编译头
