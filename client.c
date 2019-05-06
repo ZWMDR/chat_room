@@ -32,7 +32,8 @@ void* pthread_recv(void * arg)
                 close(sockfd);
                 exit(1);
             }
-            printf("%s\n",buffer);
+			char* buf=buffer;
+            printf("%s\n",buf+=28);
         }
     }
 
@@ -65,7 +66,7 @@ void* pthread_send(void * arg)
         }
         else
         {
-			printf("send");
+			//printf("send");
             strncat(buffer,buf,strlen(buf)-1);
             if((send(sockfd,buffer,SIZE,0)) <= 0)
             {
