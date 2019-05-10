@@ -32,8 +32,13 @@ void* pthread_recv(void * arg)
                 close(sockfd);
                 exit(1);
             }
-			char* buf=buffer;
-            printf("%s\n",buf+=28);
+			if(strncmp(buffer,"SYS_SIGNAL_ONLINE_COUNT:",23)==0)
+			{
+				char* buf=buffer;
+				printf("%s\n",buf+=28);
+			}
+			else
+				printf("%s\n",buffer);
         }
     }
 

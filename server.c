@@ -96,22 +96,14 @@ void* pthread_handle(void * arg)
         memset(buffer,0,SIZE);
         if((recv(connfd[index],buffer,SIZE,0)) <= 0)
         {
-            memset(buff,0,SIZE);
-			time(&timep);
-			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
-			strcat(buff,"系统消息:\n\t");
-			strcat(buff,USERS[k].name);
-			strcat(buff,"已退出聊天室");
-			printf("%s\n",buff);
-			
-			close(connfd[i]);
-			USERS[k].log_status=0;
-			connfd[index]=-1;
-			log_out_flag=1;
-        }
-		if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
-		{
+			/*
+            int counts=0;
+			for(int ss=0;ss<LISTEN_MAX;ss++)
+				if(USERS[ss].log_status)
+					counts++;
+			*/
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
@@ -120,6 +112,32 @@ void* pthread_handle(void * arg)
 			strcat(buff,USERS[k].name);
 			strcat(buff,"已退出聊天室");
 			printf("%s\n",buff);
+			strcat(time_ch,buff);
+			
+			close(connfd[i]);
+			USERS[k].log_status=0;
+			connfd[index]=-1;
+			log_out_flag=1;
+        }
+		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
+		{
+			/*
+			int counts=0;
+			for(int ss=0;ss<LISTEN_MAX;ss++)
+				if(USERS[ss].log_status)
+					counts++;
+			*/
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,"系统消息:\n\t");
+			strcat(buff,USERS[k].name);
+			strcat(buff,"已退出聊天室");
+			printf("%s\n",buff);
+			strcat(time_ch,buff);
 			
 			close(connfd[i]);
 			USERS[k].log_status=0;
@@ -128,13 +146,14 @@ void* pthread_handle(void * arg)
 		}
 		else//用户发送消息
 		{
+			/*
 			int counts=0;
 			for(int ss=0;ss<LISTEN_MAX;ss++)
 				if(USERS[ss].log_status)
 					counts++;
-			
+			*/
 			memset(time_ch,0,SIZE);
-			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",counts);
+			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
 			
 			memset(buff,0,SIZE);
 			time(&timep);
@@ -164,7 +183,7 @@ void* pthread_handle(void * arg)
 		if(log_out_flag)
 		{
 			pthread_exit(0);
-			//online_count--;
+			online_count--;
 		}
 
     }
@@ -387,6 +406,8 @@ int main_main(int argc, char **argv)
 		recv(connfd[i],buffer,SIZE,0);
 		if(strcmp(buffer,"OK")!=0)
 			continue;
+		else
+			online_count++;
 		
 		
 		memset(buffer,0,SIZE);
@@ -402,29 +423,15 @@ int main_main(int argc, char **argv)
 		fprintf(log_in_log,"%s\n",buffer);
 		fclose(log_in_log);
 		
-		/*
-		online_count=0;
-		for(int m=0;m<LISTEN_MAX;m++)
-		{
-			if(USERS[m].log_status)
-				online_count++;
-		}
-		memset(buffer,0,SIZE);
-		stpcpy(buffer,"SYS_SIGNAL_ONLINE_COUNT:");
-		sprintf(buffer,"%3d",online_count);
-		printf("%s\n",buffer);
-		send(connfd[i],buffer,SIZE,0);
-		recv(connfd[i],buffer,SIZE,0);
-		*/
-		
         //把界面发送给客户端
+		/*
 		int counts=0;
 		for(int ss=0;ss<LISTEN_MAX;ss++)
 			if(USERS[ss].log_status)
 				counts++;
-		
+		*/
         memset(buffer,0,SIZE);
-		sprintf(buffer,"SYS_SIGNAL_ONLINE_COUNT:%03d ",counts);
+		sprintf(buffer,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
         strcat(buffer,"\n------------------------欢迎来到电子垃圾聊天室----------------------------\n");
 		strcat(buffer,"\n--------------------------输入“Q”退出聊天室-------------------------------\n");
         send(connfd[i],buffer,SIZE,0);
@@ -433,9 +440,17 @@ int main_main(int argc, char **argv)
         //printf("before recv\n");
         
         //printf("after recv\n");
-		memset(buffer,0,SIZE);
+		/*
+		counts=0;
+		for(int ss=0;ss<LISTEN_MAX;ss++)
+			if(USERS[ss].log_status)
+				counts++;
+		*/
+        memset(buffer,0,SIZE);
+		sprintf(buffer,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
+		
 		strcpy(buffer,name);
-        strcat( buffer," 加入聊天室....");
+        strcat( buffer," 加入聊天室......\n");
 		record_log=fopen("record.log","a+");
 		fprintf(record_log,"%s\n",buffer);
 		fclose(record_log);
