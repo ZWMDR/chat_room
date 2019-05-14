@@ -13,7 +13,7 @@
 #include<time.h>
 #include<pthread.h>
 #include<stdlib.h>
-#include <arpa/inet.h>
+#include<arpa/inet.h>
 
 #define PORT 1778
 #define SIZE 1024
@@ -118,6 +118,55 @@ void* pthread_handle(void * arg)
 			connfd[index]=-1;
 			log_out_flag=1;
         }
+		else if(strncmp(buffer,"SYS_SIGNAL_IMG:",14)==0)//图片接收
+		{
+			char *p;
+			char split[3][100]={0};
+			const char *delim=":";
+			int count=0;
+			p=strtok(buffer,delim);
+			while(p)
+			{
+				strcpy(split[count++],p);
+				p=strtok(NULL,delim);
+			}
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y_%m_%d_%H_%M_%S_", p_curtime);
+			memset(buffer,0,SIZE);
+			strcpy(buffer,"recv_imgs/");
+			strcat(buffer,buff);
+			strcat(buffer,split[1]);
+			FILE *img=fopen(buffer,"wb");
+			count=atoi(split[2]);
+			while(count--)
+			{
+				memset(buffer,0,SIZE);
+				recv(connfd[index],buffer,SIZE,0);
+				strcpy(buff,"OK");
+				send(connfd[index],buff,SIZE,0);
+				fwrite(buffer,sizeof(char),SIZE,img);
+			}
+			fclose(img);
+			
+			online_count=0;
+			for(int ss=0;ss<LISTEN_MAX;ss++)
+				if(USERS[ss].log_status)
+					online_count++;
+
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
+			
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,USERS[k].name);
+			strcat(buff,":\n\t");
+			strcat(buff,"发送了一张图片");
+			strcat(time_ch,buff);
+		}
 		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
 		{
 			USERS[k].log_status=0;
@@ -145,7 +194,6 @@ void* pthread_handle(void * arg)
 		}
 		else//用户发送消息
 		{
-
 			online_count=0;
 			for(int ss=0;ss<LISTEN_MAX;ss++)
 				if(USERS[ss].log_status)
@@ -183,7 +231,6 @@ void* pthread_handle(void * arg)
 		{
 			pthread_exit(0);
 		}
-
     }
 }
 void quit()  
@@ -202,7 +249,7 @@ void quit()
             {
                 if(connfd[i] != -1)  
                 {
-                    close(connfd[i]); 
+                    close(connfd[i]);
                 }
             }
             exit(0);  
@@ -210,7 +257,8 @@ void quit()
     }
 }
 
-int main_main(int argc, char **argv)
+//int main_main(int argc, char **argv)
+int main(int argc, char **argv)
 {
     struct sockaddr_in client_addr;
     int sin_size;
@@ -295,7 +343,6 @@ int main_main(int argc, char **argv)
             //exit(-1);
 			continue;
         }
-		
 		
         printf("Accept successful!\n");
         printf("connect to client %d : %s:%d \n",num , inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
@@ -466,6 +513,7 @@ int main_main(int argc, char **argv)
    }
    return 0;
 }
+/*
 
 void mydaemon(int ischdir, int isclose, int argc, char** argv)
 {
@@ -519,3 +567,4 @@ int main(int argc, char* argv[])
 
 	exit(EXIT_SUCCESS);
 }
+*/
