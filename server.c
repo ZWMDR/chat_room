@@ -68,8 +68,8 @@ int get_sockfd()
         exit(-1);   
     }
     printf("Bind successful!\n");
-    //设置允许连接的最大客户端数     
-    if(listen(listenfd,LISTEN_MAX)==-1)     
+    //设置允许连接的最大客户端数
+    if(listen(listenfd,LISTEN_MAX)==-1)
     {
         perror("bind");
         exit(-1); 
@@ -96,12 +96,12 @@ void* pthread_handle(void * arg)
         memset(buffer,0,SIZE);
         if((recv(connfd[index],buffer,SIZE,0)) <= 0)
         {
-			/*
-            int counts=0;
+			USERS[k].log_status=0;
+            online_count=0;
 			for(int ss=0;ss<LISTEN_MAX;ss++)
 				if(USERS[ss].log_status)
-					counts++;
-			*/
+					online_count++;
+
 			memset(time_ch,0,SIZE);
 			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
 			memset(buff,0,SIZE);
@@ -115,18 +115,17 @@ void* pthread_handle(void * arg)
 			strcat(time_ch,buff);
 			
 			close(connfd[i]);
-			USERS[k].log_status=0;
 			connfd[index]=-1;
 			log_out_flag=1;
         }
 		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
 		{
-			/*
-			int counts=0;
+			USERS[k].log_status=0;
+			online_count=0;
 			for(int ss=0;ss<LISTEN_MAX;ss++)
 				if(USERS[ss].log_status)
-					counts++;
-			*/
+					online_count++;
+
 			memset(time_ch,0,SIZE);
 			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
 			memset(buff,0,SIZE);
@@ -140,18 +139,18 @@ void* pthread_handle(void * arg)
 			strcat(time_ch,buff);
 			
 			close(connfd[i]);
-			USERS[k].log_status=0;
 			connfd[index]=-1;
 			log_out_flag=1;
+			online_count--;
 		}
 		else//用户发送消息
 		{
-			/*
-			int counts=0;
+
+			online_count=0;
 			for(int ss=0;ss<LISTEN_MAX;ss++)
 				if(USERS[ss].log_status)
-					counts++;
-			*/
+					online_count++;
+
 			memset(time_ch,0,SIZE);
 			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
 			
@@ -183,7 +182,6 @@ void* pthread_handle(void * arg)
 		if(log_out_flag)
 		{
 			pthread_exit(0);
-			online_count--;
 		}
 
     }
@@ -294,7 +292,7 @@ int main_main(int argc, char **argv)
         if((conn=accept(listenfd,(struct sockaddr *)(&client_addr),&sin_size))==-1)         
         {
             perror("accept");
-            //exit(-1);//要continue还是exit，再考虑
+            //exit(-1);
 			continue;
         }
 		
@@ -366,7 +364,7 @@ int main_main(int argc, char **argv)
 			else
 				strcpy(buffer,"ERROR");//未知错误
 		}
-		else
+		else//注册
 		{
 			judge = 3;
 			memset(buffer, 0, SIZE);
@@ -406,9 +404,8 @@ int main_main(int argc, char **argv)
 		recv(connfd[i],buffer,SIZE,0);
 		if(strcmp(buffer,"OK")!=0)
 			continue;
-		else
-			online_count++;
-		
+
+		online_count++;
 		
 		memset(buffer,0,SIZE);
 		time(&timep);
@@ -424,12 +421,12 @@ int main_main(int argc, char **argv)
 		fclose(log_in_log);
 		
         //把界面发送给客户端
-		/*
-		int counts=0;
+		
+		online_count=0;
 		for(int ss=0;ss<LISTEN_MAX;ss++)
 			if(USERS[ss].log_status)
-				counts++;
-		*/
+				online_count++;
+		
         memset(buffer,0,SIZE);
 		sprintf(buffer,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
         strcat(buffer,"\n------------------------欢迎来到电子垃圾聊天室----------------------------\n");
@@ -437,15 +434,6 @@ int main_main(int argc, char **argv)
         send(connfd[i],buffer,SIZE,0);
 		
         //将加入的新客户发送给所有在线的客户端/
-        //printf("before recv\n");
-        
-        //printf("after recv\n");
-		/*
-		counts=0;
-		for(int ss=0;ss<LISTEN_MAX;ss++)
-			if(USERS[ss].log_status)
-				counts++;
-		*/
         memset(buffer,0,SIZE);
 		sprintf(buffer,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
 		
