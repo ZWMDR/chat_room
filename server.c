@@ -122,7 +122,7 @@ void* pthread_handle(void * arg)
 		{
 			printf("%s\n","Switch to img mode");
 			char *p;
-			char split[3][100]={0};
+			char split[10][100]={0};
 			const char *delim=":";
 			int split_count=0;
 			long count;
@@ -131,7 +131,6 @@ void* pthread_handle(void * arg)
 			while(p)
 			{
 				strcpy(split[split_count++],p);
-				printf("%s\n",p);
 				p=strtok(NULL,delim);
 			}
 			memset(img_name,0,SIZE);
@@ -207,6 +206,97 @@ void* pthread_handle(void * arg)
 						//usleep(2000);
 					}
 					fclose(img);
+				}
+			}
+			continue;
+		}
+		else if(strncmp(buffer,"SYS_SIGNAL_FILE:",15)==0)//文件接收
+		{
+			char *p;
+			char split[10][100]={0};
+			const char *delim=":";
+			int split_count=0;
+			long count;
+			char file_name[SIZE];
+			p=strtok(buffer,delim);
+			while(p)
+			{
+				strcpy(split[split_count++],p);
+				p=strtok(NULL,delim);
+			}
+			memset(file_name,0,SIZE);
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y_%m_%d_%H_%M_%S_", p_curtime);
+			memset(buffer,0,SIZE);
+			strcpy(file_name,"recv_files/");
+			strcat(file_name,buff);
+			strcat(file_name,split[1]);
+			printf("file_name:%s\n",file_name);
+			FILE *file=fopen(file_name,"wb");
+			count=atol(split[2]);
+			while(count>0)
+			{
+				memset(buffer,0,SIZE);
+				long recv_len=recv(connfd[index],buffer,SIZE,0);
+				fwrite(buffer,sizeof(char),recv_len,file);
+				count-=recv_len;
+			}
+			fclose(file);
+			
+			//向用户转发图片
+			struct stat statbuf;
+			stat(file_name,&statbuf);
+			count=statbuf.st_size;
+			
+			online_count=0;
+			for(int ss=0;ss<LISTEN_MAX;ss++)
+				if(USERS[ss].log_status)
+					online_count++;
+
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_FILE:%s:%ld:",file_name,count);
+			
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,USERS[k].name);
+			strcat(buff,":\n\t");
+			strcat(buff,"发送了一份文件,已保存到程序目录下recv_files文件夹下");
+			strcat(time_ch,buff);
+			
+			for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				if(connfd[i] != -1)
+				{
+					if(send(connfd[i],time_ch,SIZE,0) == -1)
+					{
+						connfd[i]=-1;
+					}
+				}
+			}
+			record_log=fopen("record.log","a+");
+			printf(" %s\n",buff);
+			fprintf(record_log,"%s\n",buff);
+			fclose(record_log);
+			
+			for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				if(connfd[i] != -1)
+				{
+					long send_count=count;
+					file=fopen(file_name,"rb");
+					while(send_count>0)
+					{
+						memset(buffer,0,SIZE);
+						fread(buffer,sizeof(char),SIZE,file);
+						long send_len=send(connfd[i],buffer,SIZE,0);
+						send_count-=send_len;
+						//usleep(2000);
+					}
+					fclose(file);
 				}
 			}
 			continue;
@@ -558,7 +648,6 @@ int main(int argc, char **argv)
    return 0;
 }
 /*
-
 void mydaemon(int ischdir, int isclose, int argc, char** argv)
 {
 	// 调用setsid() 的不能是进程组组长，当前程序有可能是进程组组长

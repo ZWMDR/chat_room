@@ -20,6 +20,7 @@ char pswd[64];
 void* pthread_recv(void * arg)
 {
     char buffer[SIZE];
+	char buff[SIZE];
     int sockfd = *(int *)arg;
     while(1)
     {
@@ -36,6 +37,78 @@ void* pthread_recv(void * arg)
 			{
 				char* buf=buffer;
 				printf("%s\n",buf+=28);
+			}
+			else if(strncmp(buffer,"SYS_SIGNAL_IMG:",14)==0)
+			{
+				int split_count=0;
+				char *p;
+				char split[10][100]={0};
+				const char *delim=":";
+				long count;
+				char img_name[SIZE];
+				p=strtok(buffer,delim);
+				while(p)
+				{
+					strcpy(split[split_count++],p);
+					//printf("%s\n",p);
+					p=strtok(NULL,delim);
+				}
+				strcpy(img_name,split[1]);
+				count=atol(split[2]);
+				FILE *img=fopen(img_name,"wb");
+				while(count>0)
+				{
+					memset(buffer,0,SIZE);
+					long recv_len=recv(sockfd,buffer,SIZE,0);
+					fwrite(buffer,sizeof(char),recv_len,img);
+					count-=recv_len;
+				}
+				fclose(img);
+				
+				memset(buff,0,SIZE);
+				for(int i=3;i<split_count;i++)
+				{
+					strcat(buff,split[i]);
+					if(i<split_count-1)
+						strcat(buff,":");
+				}
+				printf("%s\n",buff);
+			}
+			else if(strncmp(buffer,"SYS_SIGNAL_FILE:",15)==0)
+			{
+				int split_count=0;
+				char *p;
+				char split[10][100]={0};
+				const char *delim=":";
+				long count;
+				char file_name[SIZE];
+				p=strtok(buffer,delim);
+				while(p)
+				{
+					strcpy(split[split_count++],p);
+					//printf("%s\n",p);
+					p=strtok(NULL,delim);
+				}
+				strcpy(file_name,split[1]);
+				count=atol(split[2]);
+				FILE *file=fopen(file_name,"wb");
+				while(count>0)
+				{
+					memset(buffer,0,SIZE);
+					long recv_len=recv(sockfd,buffer,SIZE,0);
+					fwrite(buffer,sizeof(char),recv_len,file);
+					count-=recv_len;
+				}
+				fclose(file);
+				
+				memset(buff,0,SIZE);
+				for(int i=3;i<split_count;i++)
+				{
+					strcat(buff,split[i]);
+					if(i<split_count-1)
+						strcat(buff,":");
+				}
+				printf("%s\n",buff);
 			}
 			else
 				printf("%s\n",buffer);
