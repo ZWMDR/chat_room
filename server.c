@@ -120,35 +120,45 @@ void* pthread_handle(void * arg)
         }
 		else if(strncmp(buffer,"SYS_SIGNAL_IMG:",14)==0)//图片接收
 		{
+			printf("%s\n","Switch to img mode");
 			char *p;
 			char split[3][100]={0};
 			const char *delim=":";
-			int count=0;
+			int split_count=0;
+			long count;
+			char img_name[SIZE];
 			p=strtok(buffer,delim);
 			while(p)
 			{
-				strcpy(split[count++],p);
+				strcpy(split[split_count++],p);
+				printf("%s\n",p);
 				p=strtok(NULL,delim);
 			}
+			memset(img_name,0,SIZE);
 			memset(buff,0,SIZE);
 			time(&timep);
 			p_curtime = localtime(&timep);
 			strftime(buff, sizeof(buff), "%Y_%m_%d_%H_%M_%S_", p_curtime);
 			memset(buffer,0,SIZE);
-			strcpy(buffer,"recv_imgs/");
-			strcat(buffer,buff);
-			strcat(buffer,split[1]);
-			FILE *img=fopen(buffer,"wb");
-			count=atoi(split[2]);
-			while(count--)
+			strcpy(img_name,"recv_imgs/");
+			strcat(img_name,buff);
+			strcat(img_name,split[1]);
+			printf("img_name:%s\n",img_name);
+			FILE *img=fopen(img_name,"wb");
+			count=atol(split[2]);
+			while(count>0)
 			{
 				memset(buffer,0,SIZE);
-				recv(connfd[index],buffer,SIZE,0);
-				strcpy(buff,"OK");
-				send(connfd[index],buff,SIZE,0);
-				fwrite(buffer,sizeof(char),SIZE,img);
+				long recv_len=recv(connfd[index],buffer,SIZE,0);
+				fwrite(buffer,sizeof(char),recv_len,img);
+				count-=recv_len;
 			}
 			fclose(img);
+			
+			//向用户转发图片
+			struct stat statbuf;
+			stat(img_name,&statbuf);
+			count=statbuf.st_size;
 			
 			online_count=0;
 			for(int ss=0;ss<LISTEN_MAX;ss++)
@@ -156,7 +166,7 @@ void* pthread_handle(void * arg)
 					online_count++;
 
 			memset(time_ch,0,SIZE);
-			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
+			sprintf(time_ch,"SYS_SIGNAL_IMG:%s:%ld:",img_name,count);
 			
 			memset(buff,0,SIZE);
 			time(&timep);
@@ -164,8 +174,42 @@ void* pthread_handle(void * arg)
 			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,USERS[k].name);
 			strcat(buff,":\n\t");
-			strcat(buff,"发送了一张图片");
+			strcat(buff,"发送了一张图片,已保存到程序目录下recv_imgs文件夹下");
 			strcat(time_ch,buff);
+			
+			for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				if(connfd[i] != -1)
+				{
+					if(send(connfd[i],time_ch,SIZE,0) == -1)
+					{
+						connfd[i]=-1;
+					}
+				}
+			}
+			record_log=fopen("record.log","a+");
+			printf(" %s\n",buff);
+			fprintf(record_log,"%s\n",buff);
+			fclose(record_log);
+			
+			for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				if(connfd[i] != -1)
+				{
+					long send_count=count;
+					img=fopen(img_name,"rb");
+					while(send_count>0)
+					{
+						memset(buffer,0,SIZE);
+						fread(buffer,sizeof(char),SIZE,img);
+						long send_len=send(connfd[i],buffer,SIZE,0);
+						send_count-=send_len;
+						//usleep(2000);
+					}
+					fclose(img);
+				}
+			}
+			continue;
 		}
 		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
 		{
