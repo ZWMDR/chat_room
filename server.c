@@ -184,6 +184,20 @@ void* pthread_handle(void * arg)
 					{
 						connfd[i]=-1;
 					}
+					if(connfd[i] != -1)
+					{
+						long send_count=count;
+						img=fopen(img_name,"rb");
+						while(send_count>0)
+						{
+							memset(buffer,0,SIZE);
+							fread(buffer,sizeof(char),SIZE,img);
+							long send_len=send(connfd[i],buffer,SIZE,0);
+							send_count-=send_len;
+							//usleep(2000);
+						}
+						fclose(img);
+					}
 				}
 			}
 			record_log=fopen("record.log","a+");
@@ -191,22 +205,9 @@ void* pthread_handle(void * arg)
 			fprintf(record_log,"%s\n",buff);
 			fclose(record_log);
 			
-			for(i = 0; i < LISTEN_MAX ; i++)
+			//for(i = 0; i < LISTEN_MAX ; i++)
 			{
-				if(connfd[i] != -1)
-				{
-					long send_count=count;
-					img=fopen(img_name,"rb");
-					while(send_count>0)
-					{
-						memset(buffer,0,SIZE);
-						fread(buffer,sizeof(char),SIZE,img);
-						long send_len=send(connfd[i],buffer,SIZE,0);
-						send_count-=send_len;
-						//usleep(2000);
-					}
-					fclose(img);
-				}
+				
 			}
 			continue;
 		}
@@ -245,7 +246,7 @@ void* pthread_handle(void * arg)
 			}
 			fclose(file);
 			
-			//向用户转发图片
+			//向用户转发文件
 			struct stat statbuf;
 			stat(file_name,&statbuf);
 			count=statbuf.st_size;
@@ -264,7 +265,8 @@ void* pthread_handle(void * arg)
 			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
 			strcat(buff,USERS[k].name);
 			strcat(buff,":\n\t");
-			strcat(buff,"发送了一份文件,已保存到程序目录下recv_files文件夹下");
+			strcat(buff,"发送了一份文件,已保存到程序目录下recv_files文件夹下\n文件名：");
+			strcat(buff,file_name);
 			strcat(time_ch,buff);
 			
 			for(i = 0; i < LISTEN_MAX ; i++)
@@ -300,6 +302,34 @@ void* pthread_handle(void * arg)
 				}
 			}
 			continue;
+		}
+		else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)//表情
+		{
+			char *p;
+			char split[5][100]={0};
+			const char *delim=":";
+			int split_count=0;
+			long count;
+			char file_name[SIZE];
+			p=strtok(buffer,delim);
+			while(p)
+			{
+				strcpy(split[split_count++],p);
+				p=strtok(NULL,delim);
+			}
+			char emoji[100];
+			strcpy(emoji,split[1]);
+			
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,USERS[k].name);
+			strcat(buff,":\n\t");
+			strcat(buff,"向您发送了一个表情，该客户端暂不支持查看");
+			
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_EMOTION:%s:%s",emoji,buff);
 		}
 		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
 		{
@@ -391,8 +421,8 @@ void quit()
     }
 }
 
-//int main_main(int argc, char **argv)
-int main(int argc, char **argv)
+int main_main(int argc, char **argv)
+//int main(int argc, char **argv)
 {
     struct sockaddr_in client_addr;
     int sin_size;
@@ -647,7 +677,7 @@ int main(int argc, char **argv)
    }
    return 0;
 }
-/*
+
 void mydaemon(int ischdir, int isclose, int argc, char** argv)
 {
 	// 调用setsid() 的不能是进程组组长，当前程序有可能是进程组组长
@@ -700,4 +730,3 @@ int main(int argc, char* argv[])
 
 	exit(EXIT_SUCCESS);
 }
-*/

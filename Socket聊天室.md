@@ -1136,7 +1136,7 @@ int main(int argc, char* argv[])
 
 #### 2.2 开发环境
 
-程序运行于本地基于Windows10子系统WSL的Ubuntu18.04。
+程序运行于本地基于Windows10子系统WSL的Ubuntu18.04；编程语言：C语言。
 
 #### 2.3 程序架构
 
