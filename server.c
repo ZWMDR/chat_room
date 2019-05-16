@@ -204,11 +204,6 @@ void* pthread_handle(void * arg)
 			printf(" %s\n",buff);
 			fprintf(record_log,"%s\n",buff);
 			fclose(record_log);
-			
-			//for(i = 0; i < LISTEN_MAX ; i++)
-			{
-				
-			}
 			continue;
 		}
 		else if(strncmp(buffer,"SYS_SIGNAL_FILE:",15)==0)//文件接收

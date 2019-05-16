@@ -110,6 +110,30 @@ void* pthread_recv(void * arg)
 				}
 				printf("%s\n",buff);
 			}
+			else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)
+			{
+				int split_count=0;
+				char *p;
+				char split[10][100]={0};
+				const char *delim=":";
+				long count;
+				char file_name[SIZE];
+				p=strtok(buffer,delim);
+				while(p)
+				{
+					strcpy(split[split_count++],p);
+					//printf("%s\n",p);
+					p=strtok(NULL,delim);
+				}
+				memset(buff,0,SIZE);
+				for(int i=3;i<split_count;i++)
+				{
+					strcat(buff,split[i]);
+					if(i<split_count-1)
+						strcat(buff,":");
+				}
+				printf("%s\n",buff);
+			}
 			else
 				printf("%s\n",buffer);
         }
@@ -127,7 +151,7 @@ void* pthread_send(void * arg)
         memset(buf,0,SIZE);
         fgets(buf,SIZE,stdin);//获取用户输入的信息
         memset(buffer,0,SIZE);
-        /*输出时间和客户端的名字*/
+
 
         /*对客户端程序进行管理*/
         if(strncmp("Q",buf,1)==0)

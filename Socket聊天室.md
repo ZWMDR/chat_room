@@ -213,11 +213,14 @@ if(strcmp(buffer,"OK")!=0)
 
 
 
-#### 1.6 多线程处理
+#### 1.6 多线程处理接收信息
+
+##### 1.6.1 总述
 
 为应对多个用户同时登陆，单线程处理难以完成同时应对多个用户的收发信息操作。
 因此，特引入多线程机制，为每一个登录的用户创建一个接收信息同时转发信息到其它用户的子线程，以处理随机产生的接收、发送操作。
 多线程编程的头文件以及几个重要的函数为：
+
 ```c
 //头文件
 #include<pthread.h>
@@ -242,162 +245,200 @@ if(ret != 0)
 }
 ```
 
-子线程处理函数如下：
-```c
-void* pthread_handle(void * arg)
-{
-    unsigned int index;
-	int i,k;
-	int log_out_flag=0;
-    index = *(unsigned int *)arg;
-	k=0x0000FFFF&index;//该用户在用户信息数据库中的序号
-	index=(0xFFFF0000&index)>>16;//该用户的线程序号
-    printf("in pthread_recv,index = %d,connfd = %d\n",index,connfd[index]);
-    char buffer[SIZE];
-	char buff[SIZE];
-	char time_ch[SIZE];
-    while(1)
-    {
-        //用于接收信息
-        memset(buffer,0,SIZE);
-        if((recv(connfd[index],buffer,SIZE,0)) <= 0)//用户异常退出
-        {
-			USERS[k].log_status=0;
-            online_count=0;
-			for(int ss=0;ss<LISTEN_MAX;ss++)
-				if(USERS[ss].log_status)
-					online_count++;
+子线程负责监听对应用户发送的信息，根据所收到信息的系统信号头的不同，来判断信息的类型，并做出响应操作。信号头与信息类型的对应关系如下表：
 
-			memset(time_ch,0,SIZE);
-			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
-			memset(buff,0,SIZE);
-			time(&timep);
-			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
-			strcat(buff,"系统消息:\n\t");
-			strcat(buff,USERS[k].name);
-			strcat(buff,"已退出聊天室");
-			printf("%s\n",buff);
-			strcat(time_ch,buff);
-			
-			close(connfd[i]);
-			connfd[index]=-1;
-			log_out_flag=1;
-        }
-		else if(strncmp(buffer,"SYS_SIGNAL_IMG:",14)==0)//图片接收
+|       信号头       |   消息类型   |                           对应处理                           |
+| :----------------: | :----------: | :----------------------------------------------------------: |
+|  SYS_SIGNAL_QUIT   | 用户退出信号 | 向其余用户转发该用户退出的系统信息，清除该用户登录标志，退出该子线程 |
+|   SYS_SIGNAL_IMG   |   图片发送   | 从信号头中解析出图片名称、大小，重命名并接收到recv_imgs文件夹下；接收完成后再依次转发至所有用户 |
+|  SYS_SIGNAL_FILE   |   文件发送   | 从信号头中解析出文件名称、大小，重命名并接收到recv_files文件夹下；接收完成后再依次转发至所有用户 |
+| SYS_SIGNAL_EMOTION |   表情发送   | 从信号头中解析出重编码后的emoji表情编码，添加信号头转发至所有用户 |
+|         无         | 普通文本信息  | 添加时间、用户名等信息后转发至所有用户  |
+
+
+
+##### 1.6.2 退出信号
+
+当程序解析出退出信号时，表明该客户端即将退出登录，服务器端即将该用户的登录状态标志重置为0，同时更新在线人数，发送该用户退出的系统消息到所有客户端。
+
+##### 1.6.3 图片及文件传输
+
+###### 1.6.3.1 接收准备
+
+当程序解析出图片或文件的传输信号时，由文件/图片传输统一组合规则：
+```
+SYS_SIGNAL_IMG/SYS_SIGNAL_FILE:文件名:文件大小(字节)
+```
+随即可使用strtok函数从信号中解析出将要接收的文件名、文件大小：
+
+```c
+char *p;
+char split[10][100]={0};
+const char *delim=":";
+int split_count=0;
+long count;
+char img_name[SIZE];
+p=strtok(buffer,delim);
+while(p)
+{
+	strcpy(split[split_count++],p);
+	p=strtok(NULL,delim);
+}
+```
+
+根据命名规则，解析所得的split数组的三层分别对应于：
+
+|   层数   |         意义          |
+| :------: | :-------------------: |
+| split[0] |        信号头         |
+| split[1] |      图片/文件名      |
+| split[2] | 图片/文件大小（字节） |
+
+再将图片/文件名添加时间轴和文件夹信息，使用fopen函数在对应接收问文件夹中创建该文件，同时使用atol函数将文件大小转换为long长整型，准备从网络接收该图片/文件。
+
+###### 1.6.3.2 接收过程
+
+考虑到网络传输存在一定的随机干扰，使用函数 ```recv(connfd[index],buffer,SIZE,0)``` 接收时一次接收不一定就能够接收到```#define SIZE 1024``` 个，此时直接向文件中写入SIZE个字符可能会导致文件出错。因此，在接受是需要采用如下方式，双重校验：
+
+```C
+FILE *img=fopen(img_name,"wb");
+count=atol(split[2]);
+while(count>0)
+{
+	memset(buffer,0,SIZE);
+	long recv_len=recv(connfd[index],buffer,SIZE,0);
+	fwrite(buffer,sizeof(char),recv_len,img);
+	count-=recv_len;
+}
+fclose(img);
+```
+
+###### 1.6.3.3 文件、图片转发
+
+服务器端完成接收后，随即向所有用户以相同方式转发该文件/图片。具体实现过程如下：
+
+```C
+//向用户转发图片
+struct stat statbuf;
+stat(img_name,&statbuf);
+count=statbuf.st_size;
+
+online_count=0;
+for(int ss=0;ss<LISTEN_MAX;ss++)
+if(USERS[ss].log_status)
+	online_count++;
+memset(time_ch,0,SIZE);
+sprintf(time_ch,"SYS_SIGNAL_IMG:%s:%ld:",img_name,count);
+memset(buff,0,SIZE);
+time(&timep);
+p_curtime = localtime(&timep);
+strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+strcat(buff,USERS[k].name);
+strcat(buff,":\n\t");
+strcat(buff,"发送了一张图片,已保存到程序目录下recv_imgs文件夹下");
+strcat(time_ch,buff);
+
+for(i = 0; i < LISTEN_MAX ; i++)
+{
+	if(connfd[i] != -1)
+	{
+		if(send(connfd[i],time_ch,SIZE,0) == -1)
 		{
-			char *p;
-			char split[3][100]={0};
-			const char *delim=":";
-			int count=0;
-			p=strtok(buffer,delim);
-			while(p)
-			{
-				strcpy(split[count++],p);
-				p=strtok(NULL,delim);
-			}
-			memset(buff,0,SIZE);
-			time(&timep);
-			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buff), "%Y_%m_%d_%H_%M_%S_", p_curtime);
-			memset(buffer,0,SIZE);
-			strcpy(buffer,"recv_imgs/");
-			strcat(buffer,buff);
-			strcat(buffer,split[1]);
-			FILE *img=fopen(buffer,"wb");
-			count=atoi(split[2]);
-			while(count--)
+			connfd[i]=-1;
+		}
+		if(connfd[i] != -1)
+		{
+			long send_count=count;
+			img=fopen(img_name,"rb");
+			while(send_count>0)
 			{
 				memset(buffer,0,SIZE);
-				recv(connfd[index],buffer,SIZE,0);
-				strcpy(buff,"OK");
-				send(connfd[index],buff,SIZE,0);
-				fwrite(buffer,sizeof(char),SIZE,img);
+				fread(buffer,sizeof(char),SIZE,img);
+				long send_len=send(connfd[i],buffer,SIZE,0);
+				send_count-=send_len;
 			}
 			fclose(img);
-			
-			online_count=0;
-			for(int ss=0;ss<LISTEN_MAX;ss++)
-				if(USERS[ss].log_status)
-					online_count++;
+		}
+	}
+}
+```
 
-			memset(time_ch,0,SIZE);
-			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
-			
-			memset(buff,0,SIZE);
-			time(&timep);
-			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
-			strcat(buff,USERS[k].name);
-			strcat(buff,":\n\t");
-			strcat(buff,"发送了一张图片");
-			strcat(time_ch,buff);
-		}
-		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户正常退出
-		{
-			USERS[k].log_status=0;
-			online_count=0;
-			for(int ss=0;ss<LISTEN_MAX;ss++)
-				if(USERS[ss].log_status)
-					online_count++;
 
-			memset(time_ch,0,SIZE);
-			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
-			memset(buff,0,SIZE);
-			time(&timep);
-			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buffer), "%Y/%m/%d %H:%M:%S\n", p_curtime);
-			strcat(buff,"系统消息:\n\t");
-			strcat(buff,USERS[k].name);
-			strcat(buff,"已退出聊天室");
-			printf("%s\n",buff);
-			strcat(time_ch,buff);
-			
-			close(connfd[i]);
-			connfd[index]=-1;
-			log_out_flag=1;
-			online_count--;
-		}
-		else//用户发送普通消息
-		{
-			online_count=0;
-			for(int ss=0;ss<LISTEN_MAX;ss++)
-				if(USERS[ss].log_status)
-					online_count++;
 
-			memset(time_ch,0,SIZE);
-			sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
-			
-			memset(buff,0,SIZE);
-			time(&timep);
-			p_curtime = localtime(&timep);
-			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
-			strcat(buff,USERS[k].name);
-			strcat(buff,":\n\t");
-			strcat(buff,buffer);
-			strcat(time_ch,buff);
-		}
-		
-		record_log=fopen("record.log","a+");
-        printf(" %s\n",buff);
-		fprintf(record_log,"%s\n",buff);
-		fclose(record_log);
-		
-        for(i = 0; i < LISTEN_MAX ; i++)
-        {
-            if(connfd[i] != -1)
-            {
-                if(send(connfd[i],time_ch,SIZE,0) == -1)
-                {
-                    connfd[i]=-1;
-                }
-            }
-        }
-		if(log_out_flag)
-		{
-			pthread_exit(0);
-		}
-    }
+##### 1.6.4 表情传输
+
+当服务器解析出表情传输信号时，根据表情传输信号命名规则：
+
+```
+SYS_SIGNAL_EMOTION:表情编号.png
+```
+
+通过与上述相同方式解析出表情的编号，添加信号头以及信息内容后，依次转发给所有用户。
+
+服务器发出时信号组合规则如下：
+
+```
+SYS_SIGNAL_EMOTION:表情编号.png:系统信息
+```
+
+用户端以相同方式解析出表情编号及系统信息后，根据不同类型客户端的特性选择性显示出不同部分的信息。
+
+具体实现方式如下：
+
+```C
+else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)//表情
+{
+	char *p;
+	char split[5][100]={0};
+	const char *delim=":";
+	int split_count=0;
+	long count;
+	char file_name[SIZE];
+	p=strtok(buffer,delim);
+	while(p)
+	{
+		strcpy(split[split_count++],p);
+		p=strtok(NULL,delim);
+	}
+	char emoji[100];
+	strcpy(emoji,split[1]);
+	memset(buff,0,SIZE);
+	time(&timep);
+	p_curtime = localtime(&timep);
+	strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+	strcat(buff,USERS[k].name);
+	strcat(buff,":\n\t");
+	strcat(buff,"向您发送了一个表情，该客户端暂不支持查看");
+	
+	memset(time_ch,0,SIZE);
+	sprintf(time_ch,"SYS_SIGNAL_EMOTION:%s:%s",emoji,buff);
+}
+```
+
+
+
+##### 1.6.5 普通信息传输
+
+对于未添加信号头的信息，系统判定为普通文本信息，对于这样的信息，服务器端直接在信息前添加系统时间、用户名信息，转发给所有用户。
+
+```
+else//用户发送消息
+{
+	online_count=0;
+	for(int ss=0;ss<LISTEN_MAX;ss++)
+		if(USERS[ss].log_status)
+			online_count++;
+		memset(time_ch,0,SIZE);
+	sprintf(time_ch,"SYS_SIGNAL_ONLINE_COUNT:%03d ",online_count);
+	
+	memset(buff,0,SIZE);
+	time(&timep);
+	p_curtime = localtime(&timep);
+	strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+	strcat(buff,USERS[k].name);
+	strcat(buff,":\n\t");
+	strcat(buff,buffer);
+	strcat(time_ch,buff);
 }
 ```
 
@@ -412,43 +453,26 @@ void* pthread_handle(void * arg)
 ```c
 void mydaemon(int ischdir, int isclose, int argc, char** argv)
 {
-	// 调用setsid() 的不能是进程组组长，当前程序有可能是进程组组长
 	pid_t pid = fork();
-
-	// 非子进程则退出
 	if (pid != 0)
 		exit(-1);
-
 	// 父进程退出，留下子进程
-
-	// 创建一个新的会话期，从而脱离原有的会话期
-	// 进程同时与控制终端脱离
 	setsid();
-
-	// 此时子进程成为新会话期的领导和新的进程组长
-	// 但这样的身份可能会通过fcntl去获到终端
 	pid = fork();
 
 	// 非子进程则退出
 	if (pid != 0)
 		exit(-1);
-
-	// 此时留下来的是孙子进程,再也不能获取终端
-
-	// 通常来讲, 守护进程应该工作在一个系统永远不会删除的目录下
 	if (ischdir == 0)
 	{
 		chdir("/");
 	}
-
-	// 关闭输入输出和错误流 (通过日志来查看状态)
 	if (isclose == 0)
 	{
 		close(0);
 		close(1);
 		close(2);
 	}
-
 	//去掩码位
 	umask((mode_t)0);//sys/stat.h
 	main_main(argc, argv);
@@ -498,9 +522,17 @@ fprintf(record_log,"%s\n",buffer);
 fclose(record_log);
 ```
 
+日志文件内容如下：
 
+1. 登录记录
 
-#### 1.9 完整代码
+![1557986314621](Socket聊天室.assets/1557986314621.png)
+
+2. 聊天记录
+
+   ![1557986508792](Socket聊天室.assets/1557986508792.png)
+
+#### 1.9 服务器程序完整代码
 
 ```c
 #include<stdio.h>   
@@ -627,7 +659,7 @@ void* pthread_handle(void * arg)
 		{
 			printf("%s\n","Switch to img mode");
 			char *p;
-			char split[3][100]={0};
+			char split[10][100]={0};
 			const char *delim=":";
 			int split_count=0;
 			long count;
@@ -636,7 +668,6 @@ void* pthread_handle(void * arg)
 			while(p)
 			{
 				strcpy(split[split_count++],p);
-				printf("%s\n",p);
 				p=strtok(NULL,delim);
 			}
 			memset(img_name,0,SIZE);
@@ -690,6 +721,99 @@ void* pthread_handle(void * arg)
 					{
 						connfd[i]=-1;
 					}
+					if(connfd[i] != -1)
+					{
+						long send_count=count;
+						img=fopen(img_name,"rb");
+						while(send_count>0)
+						{
+							memset(buffer,0,SIZE);
+							fread(buffer,sizeof(char),SIZE,img);
+							long send_len=send(connfd[i],buffer,SIZE,0);
+							send_count-=send_len;
+							//usleep(2000);
+						}
+						fclose(img);
+					}
+				}
+			}
+			record_log=fopen("record.log","a+");
+			printf(" %s\n",buff);
+			fprintf(record_log,"%s\n",buff);
+			fclose(record_log);
+			
+			//for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				
+			}
+			continue;
+		}
+		else if(strncmp(buffer,"SYS_SIGNAL_FILE:",15)==0)//文件接收
+		{
+			char *p;
+			char split[10][100]={0};
+			const char *delim=":";
+			int split_count=0;
+			long count;
+			char file_name[SIZE];
+			p=strtok(buffer,delim);
+			while(p)
+			{
+				strcpy(split[split_count++],p);
+				p=strtok(NULL,delim);
+			}
+			memset(file_name,0,SIZE);
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y_%m_%d_%H_%M_%S_", p_curtime);
+			memset(buffer,0,SIZE);
+			strcpy(file_name,"recv_files/");
+			strcat(file_name,buff);
+			strcat(file_name,split[1]);
+			printf("file_name:%s\n",file_name);
+			FILE *file=fopen(file_name,"wb");
+			count=atol(split[2]);
+			while(count>0)
+			{
+				memset(buffer,0,SIZE);
+				long recv_len=recv(connfd[index],buffer,SIZE,0);
+				fwrite(buffer,sizeof(char),recv_len,file);
+				count-=recv_len;
+			}
+			fclose(file);
+			
+			//向用户转发文件
+			struct stat statbuf;
+			stat(file_name,&statbuf);
+			count=statbuf.st_size;
+			
+			online_count=0;
+			for(int ss=0;ss<LISTEN_MAX;ss++)
+				if(USERS[ss].log_status)
+					online_count++;
+
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_FILE:%s:%ld:",file_name,count);
+			
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,USERS[k].name);
+			strcat(buff,":\n\t");
+			strcat(buff,"发送了一份文件,已保存到程序目录下recv_files文件夹下\n文件名：");
+			strcat(buff,file_name);
+			strcat(time_ch,buff);
+			
+			for(i = 0; i < LISTEN_MAX ; i++)
+			{
+				if(connfd[i] != -1)
+				{
+					if(send(connfd[i],time_ch,SIZE,0) == -1)
+					{
+						connfd[i]=-1;
+					}
 				}
 			}
 			record_log=fopen("record.log","a+");
@@ -702,19 +826,47 @@ void* pthread_handle(void * arg)
 				if(connfd[i] != -1)
 				{
 					long send_count=count;
-					img=fopen(img_name,"rb");
+					file=fopen(file_name,"rb");
 					while(send_count>0)
 					{
 						memset(buffer,0,SIZE);
-						fread(buffer,sizeof(char),SIZE,img);
+						fread(buffer,sizeof(char),SIZE,file);
 						long send_len=send(connfd[i],buffer,SIZE,0);
 						send_count-=send_len;
 						//usleep(2000);
 					}
-					fclose(img);
+					fclose(file);
 				}
 			}
 			continue;
+		}
+		else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)//表情
+		{
+			char *p;
+			char split[5][100]={0};
+			const char *delim=":";
+			int split_count=0;
+			long count;
+			char file_name[SIZE];
+			p=strtok(buffer,delim);
+			while(p)
+			{
+				strcpy(split[split_count++],p);
+				p=strtok(NULL,delim);
+			}
+			char emoji[100];
+			strcpy(emoji,split[1]);
+			
+			memset(buff,0,SIZE);
+			time(&timep);
+			p_curtime = localtime(&timep);
+			strftime(buff, sizeof(buff), "%Y/%m/%d %H:%M:%S\n", p_curtime);
+			strcat(buff,USERS[k].name);
+			strcat(buff,":\n\t");
+			strcat(buff,"向您发送了一个表情，该客户端暂不支持查看");
+			
+			memset(time_ch,0,SIZE);
+			sprintf(time_ch,"SYS_SIGNAL_EMOTION:%s:%s",emoji,buff);
 		}
 		else if(strcmp(buffer,"SYS_SIGNAL_QUIT")==0)//用户退出
 		{
@@ -807,6 +959,7 @@ void quit()
 }
 
 int main_main(int argc, char **argv)
+//int main(int argc, char **argv)
 {
     struct sockaddr_in client_addr;
     int sin_size;
@@ -1064,43 +1217,25 @@ int main_main(int argc, char **argv)
 
 void mydaemon(int ischdir, int isclose, int argc, char** argv)
 {
-	// 调用setsid() 的不能是进程组组长，当前程序有可能是进程组组长
 	pid_t pid = fork();
-
 	// 非子进程则退出
 	if (pid != 0)
 		exit(-1);
-
-	// 父进程退出，留下子进程
-
-	// 创建一个新的会话期，从而脱离原有的会话期
-	// 进程同时与控制终端脱离
-	setsid();
-
-	// 此时子进程成为新会话期的领导和新的进程组长
-	// 但这样的身份可能会通过fcntl去获到终端
 	pid = fork();
 
 	// 非子进程则退出
 	if (pid != 0)
 		exit(-1);
-
-	// 此时留下来的是孙子进程,再也不能获取终端
-
-	// 通常来讲, 守护进程应该工作在一个系统永远不会删除的目录下
 	if (ischdir == 0)
 	{
 		chdir("/");
 	}
-
-	// 关闭输入输出和错误流 (通过日志来查看状态)
 	if (isclose == 0)
 	{
 		close(0);
 		close(1);
 		close(2);
 	}
-
 	//去掩码位
 	umask((mode_t)0);//sys/stat.h
 	main_main(argc, argv);
@@ -1109,30 +1244,46 @@ void mydaemon(int ischdir, int isclose, int argc, char** argv)
 int main(int argc, char* argv[])
 {
 	mydaemon(1, 1, argc, argv);
-
 	while (1);
-
 	exit(EXIT_SUCCESS);
 }
+
 ```
 
 #### 1.10 版本控制
 
-| 版本号 |   日期    |                修改                |
-| :----: | :-------: | :--------------------------------: |
-|  V1.0  | 2019/4/27 |          实现项目基本功能          |
-|  V1.1  | 2019/4/30 |      优化用户异常退出处理方案      |
-|  V1.2  | 2019/5/9  |        增加在线用户显示功能        |
-|  V1.3  | 2019/5/14 | 实现图片的接收与存储（服务器接收） |
-|  V1.4  |  2019/5/  |   实现的图片的发送（服务器转发）   |
+| 版本号 |    日期    |                修改                |
+| :----: | :--------: | :--------------------------------: |
+|  V1.0  | 2019/04/27 |          实现项目基本功能          |
+|  V1.1  | 2019/04/30 |      优化用户异常退出处理方案      |
+|  V1.2  | 2019/05/09 |        增加在线用户显示功能        |
+|  V1.3  | 2019/05/14 | 实现图片的接收与存储（服务器接收） |
+|  V1.4  | 2019/05/15 |   实现的图片的发送（服务器转发）   |
+|  V1.5  | 2019/05/15 |          实现文件收发功能          |
+|  V1.6  | 2019/05/16 |          实现表情收发功能          |
+|  V2.0  | 2019/05/20 |      修复部分Bug，发布正式版       |
 
 完整项目详见：[GitHub](<https://github.com/ZWMDR/chat_room>)
+
+
+
+
+
+
+
+
 
 ## 2. 客户端（命令行版本，不支持文件发送、图片或表情发送等操作）
 
 #### 2.1 简介与预览
 
+##### 2.1.1 简介
+
 命令行版本客户端是项目开发早期为调试方便而开发的客户端，命令行客户端功能简单，稳定性较高，但不支持图片发送及显示、文件发送或emoji表情显示，但支持图片与文件的接收并转存，属轻量级应用。
+
+##### 2.1.2 预览
+
+![1557986686562](Socket聊天室.assets/1557986686562.png)
 
 #### 2.2 开发环境
 
@@ -1140,27 +1291,95 @@ int main(int argc, char* argv[])
 
 #### 2.3 程序架构
 
+命令行版客户端程序同样采用多线程的方式实现。程序主线程负责接收用户的登录/注册信号、账号及密码，与服务器进行通信，最后得到登录信息，发聩给用户。登录成功后则创建两个子线程，分别用于接收服务器信息、接收键盘输入信息并发送。
+
+#### 2.4 信息发送
+
+受限于命令行窗口的限制，该版本的程序不支持图片、文件、表情的发送功能，仅支持基础的文本信息发送。
+
+信息的发送由子线程函数实现：
+```C
+void* pthread_send(void * arg);
+```
+在该子线程中，程序接收用户从键盘键入的内容，并做出逻辑判断（是否为Q）后传入发送字符串中，由Socket函数：
+```C
+send(sockfd,buffer,SIZE,0);
+```
+发送至服务器。
+
+发送部分的实现函数如下：
+```C
+void* pthread_send(void * arg)
+{
+    //时间函数
+    char buffer[SIZE],buf[SIZE];
+    int sockfd = *(int *)arg;
+
+    while(1)
+    {
+        memset(buf,0,SIZE);
+        fgets(buf,SIZE,stdin);//获取用户输入的信息
+        memset(buffer,0,SIZE);
 
 
-#### 2.4 信息收发
+        /*对客户端程序进行管理*/
+        if(strncmp("Q",buf,1)==0)
+        {
+            printf("该客户端下线...\n");
+            strcpy(buffer,"SYS_SIGNAL_QUIT");
+            if((send(sockfd,buffer,SIZE,0)) <= 0)
+            {
+                perror("error send");
+            }
+            close(sockfd);
+            sockfd = -1;
+            exit(0);
+        }
+        else
+        {
+			//printf("send");
+            strncat(buffer,buf,strlen(buf)-1);
+            if((send(sockfd,buffer,SIZE,0)) <= 0)
+            {
+                 perror("send");
+            }
+        }
+    }
+}
+```
+
+#### 2.4 信息接收
+
+信息的接收由另一个子线程不断运行recv监听函数实现。程序在while(1)循环中不断执行监听操作，当服务器有信息传入时，首先解析信号头，根据不同信号头的含义做出响应操作。
+
+信号头的含义如下：
+
+| 信号头                  | 含义         | 操作 |
+| :---------------------: | :----------: | ----------------------- |
+| SYS_SIGNAL_ONLINE_COUNT | 当前在线人数 |过滤人数显示，只显示其后的文本信息|
+| SYS_SIGNAL_IMG          | 发送图片 |接收文件，显示有图片完成传输，提醒用户到recv_imgs文件夹下查看；其具体实现方法与服务器端相同|
+| SYS_SIGNAL_FILE | 发送文件 |接收文件，显示有文件完成传输，提醒用户到recv_files文件夹下查看；其具体实现方法与服务器端相同|
+| SYS_SIGNAL_EMOTION | 发送表情 |提示无法显示表情内容|
+| 无 | 系统信息 |直接显示|
+
+对于该版本的客户端程序，无法显示图片或表情信息，因此当接收到表情信息时，不予显示，仅显示其后的系统信息；而对于图片和文件，程序仅完成接收并保存到本地文件夹，显示系统信息，但不予直接显示。具体接收的实现方式与服务器端相同。
 
 
-
-#### 2.5 完整代码
+#### 2.6 完整代码
 
 ```C
-#include<stdio.h>
-#include<netinet/in.h>  
-#include<sys/socket.h> 
-#include<sys/types.h>
-#include<string.h>
-#include<stdlib.h>
-#include<netdb.h>
-#include<unistd.h>
-#include<signal.h>
-#include<errno.h>
-#include<time.h>
-#include<pthread.h>
+#include <stdio.h>
+#include <netinet/in.h>  
+#include <sys/socket.h> 
+#include <sys/types.h>
+#include <string.h>
+#include <stdlib.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <signal.h>
+#include <errno.h>
+#include <time.h>
+#include <pthread.h>
 
 #define SIZE 1024
 #define SEND_SIZE 106
@@ -1171,6 +1390,7 @@ char pswd[64];
 void* pthread_recv(void * arg)
 {
     char buffer[SIZE];
+	char buff[SIZE];
     int sockfd = *(int *)arg;
     while(1)
     {
@@ -1187,6 +1407,102 @@ void* pthread_recv(void * arg)
 			{
 				char* buf=buffer;
 				printf("%s\n",buf+=28);
+			}
+			else if(strncmp(buffer,"SYS_SIGNAL_IMG:",14)==0)
+			{
+				int split_count=0;
+				char *p;
+				char split[10][100]={0};
+				const char *delim=":";
+				long count;
+				char img_name[SIZE];
+				p=strtok(buffer,delim);
+				while(p)
+				{
+					strcpy(split[split_count++],p);
+					//printf("%s\n",p);
+					p=strtok(NULL,delim);
+				}
+				strcpy(img_name,split[1]);
+				count=atol(split[2]);
+				FILE *img=fopen(img_name,"wb");
+				while(count>0)
+				{
+					memset(buffer,0,SIZE);
+					long recv_len=recv(sockfd,buffer,SIZE,0);
+					fwrite(buffer,sizeof(char),recv_len,img);
+					count-=recv_len;
+				}
+				fclose(img);
+				
+				memset(buff,0,SIZE);
+				for(int i=3;i<split_count;i++)
+				{
+					strcat(buff,split[i]);
+					if(i<split_count-1)
+						strcat(buff,":");
+				}
+				printf("%s\n",buff);
+			}
+			else if(strncmp(buffer,"SYS_SIGNAL_FILE:",15)==0)
+			{
+				int split_count=0;
+				char *p;
+				char split[10][100]={0};
+				const char *delim=":";
+				long count;
+				char file_name[SIZE];
+				p=strtok(buffer,delim);
+				while(p)
+				{
+					strcpy(split[split_count++],p);
+					//printf("%s\n",p);
+					p=strtok(NULL,delim);
+				}
+				strcpy(file_name,split[1]);
+				count=atol(split[2]);
+				FILE *file=fopen(file_name,"wb");
+				while(count>0)
+				{
+					memset(buffer,0,SIZE);
+					long recv_len=recv(sockfd,buffer,SIZE,0);
+					fwrite(buffer,sizeof(char),recv_len,file);
+					count-=recv_len;
+				}
+				fclose(file);
+				
+				memset(buff,0,SIZE);
+				for(int i=3;i<split_count;i++)
+				{
+					strcat(buff,split[i]);
+					if(i<split_count-1)
+						strcat(buff,":");
+				}
+				printf("%s\n",buff);
+			}
+			else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)
+			{
+				int split_count=0;
+				char *p;
+				char split[10][100]={0};
+				const char *delim=":";
+				long count;
+				char file_name[SIZE];
+				p=strtok(buffer,delim);
+				while(p)
+				{
+					strcpy(split[split_count++],p);
+					//printf("%s\n",p);
+					p=strtok(NULL,delim);
+				}
+				memset(buff,0,SIZE);
+				for(int i=3;i<split_count;i++)
+				{
+					strcat(buff,split[i]);
+					if(i<split_count-1)
+						strcat(buff,":");
+				}
+				printf("%s\n",buff);
 			}
 			else
 				printf("%s\n",buffer);
@@ -1401,57 +1717,603 @@ int main(int argc, char **argv)
 }
 ```
 
+#### 2.7 版本控制
 
-
-#### 2.6 版本控制
-
-
+| 版本号 | 时间 | 修改 |
+| :----: | :--: | :--: |
+|  V1.0  | 2019/04/27 |   实现项目基本功能V1.0   |
+|  V1.4  | 2019/05/15 |     实现的图片的接收     |
+|  V1.5  | 2019/05/15 |     实现文件接收功能     |
+|  V1.6  | 2019/05/16 |     实现表情接收功能     |
+|  V2.0  | 2019/05/20 | 修复部分Bug，发布正式版 |
 
 完整项目详见：[GitHub](<https://github.com/ZWMDR/chat_room>)
 
+
+
+
+
+
+
+
+
 ## 3. 客户端（GUI版本，完整功能）
 
-#### 3.1 简介与预览
+### 3.1 简介
+
+为了能够直观、方便地实现表情、图片及文件的传输，我还使用Qt开发GUI版客户端作为本项目的重点开发程序，可实现本项目的所有预设功能。
+
+### 3.2 开发环境
+
+GUI版本程序主要使用Windows 64位版Qt5.9.8开发，使用MinGW5.3.0编译；同时程序也在64位Ubuntu16.04操作系统Qt5.9.8客户端中使用GCC编译通过，可实现跨平台编译。
+
+程序主要使用C++语言编写，辅以少量C语言及QMake。
+
+### 3.3 程序架构
+
+程序包含两个主要界面和一个辅助界面，分别为：登录界面、聊天主界面和表情选择界面。
+
+具体逻辑关系如下：
+
+#### 3.3.1 登陆界面
+
+```flow
+st=>start: 程序启动
+run=>operation: 显示Log_in登录界面
+autofill=>condition: 是否存在config.ini配置文件？
+input=>operation: 输入用户名、密码
+fill=>operation: 自动填充
+verify=>operation: 服务器通信
+_verify=>condition: 登陆是否成功？
+log_in=>end: 用户登录，调用聊天室主界面Chat_Window
+hint=>operation: 错误提示
+
+st->run->autofill
+autofill(no)->input
+autofill(yes)->fill
+fill->input
+input->verify
+verify->_verify
+_verify(yes)->log_in
+_verify(no)->hint->input
+```
 
 
 
-#### 3.2 开发环境
+#### 3.3.2 聊天室主界面框架
 
-GUI版本程序使用Windows 64位版Qt5.9.8开发，程序使用MinGW5.3.0编译。
+```mermaid
+graph TD
+A(启动Chat_Window主界面) --> B(触发条件)
+B --> |One| C[点击发送按钮]
+B --> |Two| D[点击表情按钮]
+B --> |Three| E[点击图片按钮]
+B --> |Four| F[点击文件按钮]
+B --> |Five| G[Socket接收]
 
-#### 3.3 程序架构
+C  --> CA[获取输入框文本]
+CA --> S[发送到服务器]
+
+D  --> DA[显示所有表情]
+DA --> DB(选择表情序号)
+DB --> S
+
+E  --> EA[打开图片选择过滤器]
+EA --> EB[选择图片]
+EB --> EC[打开并读取图片信息]
+EC --> S
+
+F  --> FA[打开文件选择过滤器]
+FA --> FB[选择文件]
+FB --> FC[打开并读取文件信息]
+FC --> S
+
+G  --> GA[解析信号头]
+GA --> GB[判断信息类型]
+GB --> GC[对应接收操作]
+GC --> GD[对应显示操作]
+
+```
 
 
 
-#### 3.4 TCP连接
+### 3.4 TCP连接与收发
+
+为方便跨平台编译，这里使用Qt的库函数：QTcpsocket，通过将socket封装在**class**  *ip_info*中，实现在不同界面之间传递。
+
+对**ip_info**的初始化，这里重载了两个初始化函数，以便于一些后续的改进。
+
+```C++
+class IP_info
+{
+public:
+    IP_info(unsigned short port)
+    {
+        IP_addr="122.152.205.193";
+        IP_port=port;
+        connected=false;
+        sended=false;
+        recved=false;
+        socket=new QTcpSocket();
+    }
+    IP_info()
+    {
+        IP_addr="122.152.205.193";
+        IP_port=1778;
+        connected=false;
+        sended=false;
+        recved=false;
+        socket=new QTcpSocket();
+    }
+private:
+    std::string IP_addr;
+    unsigned short IP_port;
+public:
+    bool connected;
+    bool sended;
+    bool recved;
+    QTcpSocket *socket;
+};
+```
+
+在“登录“按钮触发的槽函数中，通过函数：
+
+```C++
+IP->socket->connectToHost(IP->IP_addr.c_str(), IP->IP_port);
+```
+
+建立TCP连接，并使用函数：
+
+```C++
+IP->connected=IP->socket->waitForConnected(2000);
+```
+
+判断连接是否成功建立，否则提示网络错误。
+
+```C++
+if(!IP->connected)
+{
+	QMessageBox msg;
+	msg.setWindowTitle("提示");
+    msg.setText("连接超时，请稍后重试！");
+	msg.setStyleSheet("font: 8pt;");
+	msg.setIcon((QMessageBox::Information));
+	msg.addButton(tr("确定"),QMessageBox::ActionRole);
+	msg.exec();
+	return false;
+}
+```
+
+效果如下：
+
+![1557987934890](Socket聊天室.assets/1557987934890.png)
 
 
 
-#### 3.5 主界面
-
-
-
-#### 3.6 普通消息收发
-
-
-
-#### 3.7 emoji表情
-
-
-
-#### 3.8 图片收发
-
-
-
-#### 3.9 文件收发
-
-
-
-#### 3.10 核心代码
-
-##### 3.10.1 log_in.h
+信息的收发依靠QTcpSocket类中：
 
 ```c++
+size_t QTcpSocket::read(char* buffer, size_t size);
+size_t QTcpSocket::write(char* buffer,size_t size);
+```
+
+函数实现收发，通过：
+
+```C++
+bool QTcpSocket::waitForBytesWritten(int msec=30000);
+bool QTcpSocket::waitForReadyRead(int msec=30000);
+```
+
+函数等待确定TCP收发操作已完成。
+
+
+
+### 3.5 主界面
+
+程序共有两个主界面，和一个表情显示界面。
+
+#### 3.5.1 登录界面
+
+##### 3.5.1.1 界面预览
+
+![1557988457232](Socket聊天室.assets/1557988457232.png)
+
+##### 3.5.1.2 登录流程
+
+当程序运行时，首先会在程序目录下寻找写有历史登录信息的config.ini配置文件，若成功找到则会自动补充，若没有找到则不会。用户输入的密码长度至少为5位，最多位18位，若密码长度不符合要求则会提示重新输入。
+
+![1557988749632](Socket聊天室.assets/1557988749632.png)
+
+用户输入用户名或密码后，可直接点击“登录”按钮或敲“回车”键实现登录，此时程序将从输入框读取文本信息，并于服务器通信，用户信息匹配成功后返回成功登录。
+
+对于未注册用户，可直接输入符合要求的用户名及密码，点击“注册按钮”，注册成功直接登录。
+
+![1557988883587](Socket聊天室.assets/1557988883587.png)
+
+注册时不允许重名，否则会提示用户名重复，拒绝注册请求。
+
+![1557988931728](Socket聊天室.assets/1557988931728.png)
+
+
+
+若登录过程中，出现重复登录或密码错误的情况，系统也会给出相应提示。
+
+#### 3.5.2 聊天室主界面
+
+登录成功后，随即进入到聊天室主界面。主界面左上方在聊天室后会显示当前用户名，以便查看。
+
+在界面的最上方还会显示当前系统在线人数，并实时更新。
+
+![1557989076408](Socket聊天室.assets/1557989076408.png)
+
+
+
+主界面程序中充分应用Qt的槽函数机制，将TCPSocket的读取信号与程序信息接收函数绑定，由此可不使用多线程方式实现信息的收发。
+
+```C++
+QObject::connect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+```
+
+> 其中，void Chat_Window::socket_recv( ) 函数即为信息处理函数
+
+#### 3.5.3 表情选择框
+
+程序内置64中常用表情，通过自定义特殊编码方式实现快速收发，节省系统资源。
+
+当鼠标点击“表情”按钮时，触发槽函数，槽函数中调用第三个主界面函数，从emotions文件夹下依次读取并显示出全部内置表情，效果如下图所示。
+
+![1557989440220](Socket聊天室.assets/1557989440220.png)
+
+
+
+表情图片加载函数如下：
+
+```C++
+void Emoji::addEmoji(QString path)
+{
+    this->setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    ui->tableWidget->setFocusPolicy(Qt::NoFocus);
+
+    for(int i=0;i<8;i++)
+        for(int j=0;j<8;j++)
+        {
+            QTableWidgetItem* tableWidgetItem = new QTableWidgetItem;
+            this->ui->tableWidget->setItem(j,i,tableWidgetItem);
+
+            QLabel *emoji_icon=new QLabel();
+            emoji_icon->setMargin(2);
+            QImage *img=new QImage();
+            img->load(path.arg(i+8*j+1));
+            QPixmap pixmap = QPixmap::fromImage(*img);
+            QPixmap fitpixmap = pixmap.scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation);  // 按比例缩放
+            emoji_icon->setPixmap(fitpixmap);
+            this->ui->tableWidget->setCellWidget(j,i,emoji_icon);
+        }
+}
+```
+
+
+
+### 3.6 普通消息收发
+
+
+
+### 3.7 emoji表情
+
+同样通过槽函数机制，当鼠标点击TableWidget中的表情图样时，触发槽函数，根据所点击的图标坐标定位到表情编码，并添加表情信号头后发送至服务器，实现发送。
+
+```C++
+void Emoji::on_tableWidget_cellClicked(int row, int column)
+{
+    std::cout<<"row="<<row<<" column="<<column<<std::endl;
+    QString mesg="SYS_SIGNAL_EMOTION:%1.png";
+    char buffer[SIZE];
+    strcpy(buffer,mesg.arg(column+1+8*row).toStdString().c_str());
+    this->IP->socket->write(buffer,SIZE);
+    this->IP->sended=this->IP->socket->waitForBytesWritten(2000);
+    this->close();
+}
+```
+
+
+
+接收时，在信息接收函数void Chat_Window::socket_recv()中，通过解析信号头是否为“SYS_SIGNAL_EMORION“ 判断是否为表情信息，是则通过如下字符串切片函数提取出表情编号，再从本地emotions文件夹中加载对应编号的表情图片显示到消息框中。
+
+```C++
+else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)
+{
+	QString cmd=buffer;
+	QStringList cmd_split=cmd.split(":");
+	QString emoji=cmd_split[1];
+	QString msg;
+	for(int i=2;i<cmd_split.length()-1;i++)
+	{
+		msg+=cmd_split[i];
+		msg+=":";
+	}
+	QString path="emotions\\"+emoji;
+	QTextDocumentFragment fragment;
+	this->ui->output->append(msg+"\n");
+	fragment = QTextDocumentFragment::fromHtml("<img src='"+path+"'/>");
+	this->ui->output->textCursor().insertFragment(fragment);
+	this->ui->output->setVisible(true);
+}
+```
+
+效果如下图所示：
+
+![1557990455835](Socket聊天室.assets/1557990455835.png)
+
+
+
+### 3.8 图片/文件收发
+
+#### 3.8.1 图片发送
+
+连接“图片”按钮与对应的处理槽函数，当按钮被点击时调出图片选择过滤器。
+
+![1557990587516](Socket聊天室.assets/1557990587516.png)
+
+
+
+选中相应图片后，选择框返回所选图片的绝对路径：
+
+```C++
+QFileDialog *fileDialog=new QFileDialog(this);
+fileDialog->setWindowTitle(tr("选择要发送的图片"));
+fileDialog->setDirectory(".");
+fileDialog->setNameFilter(tr("Images(*.png *.jpg *.jpeg *.bmp)"));
+fileDialog->setFileMode(QFileDialog::ExistingFiles);
+fileDialog->setViewMode(QFileDialog::Detail);
+QStringList fileNames;
+if(fileDialog->exec())
+{
+	fileNames = fileDialog->selectedFiles();
+}
+```
+
+获取了图片路径后，接下来要先获取图片的大小信息，对其大小做一个限制，不能超过5MB：
+
+```C++
+QFileInfo info(tmp);
+qint64 img_size=info.size();//字节
+std::cout<<"img_size="<<(QString::number(img_size/1024.0,10,2)+"KB,").toStdString()<<std::endl;
+if(img_size/1024/1024>5)//最大不超过5MB
+{
+	QMessageBox msg;
+	msg.setWindowTitle("提示");
+	QString mesg="所选图片大小为:"+QString::number(img_size/1024.0,10,2)+"KB,"+"图片太大无法发送!";
+	msg.setText(mesg);
+	msg.setStyleSheet("font: 8pt;");
+	msg.setIcon((QMessageBox::Information));
+	msg.addButton(tr("确定"),QMessageBox::ActionRole);
+	msg.exec();
+	continue;
+}
+```
+
+最后根据图片大小，多次循环发送图片到服务器端：
+
+```C++
+clear_buf(buffer);
+strcpy(buffer,"SYS_SIGNAL_IMG:");//系统图片发送信号
+strcat(buffer,(im_name+":").toStdString().c_str());//图片名
+strcat(buffer,QString::number(img_size,10).toStdString().c_str());//发送字节数
+counts=img_size;
+IP->socket->write(buffer,SIZE);
+IP->socket->waitForBytesWritten(2000);
+while(counts>0)
+{
+	clear_buf(buffer);
+	file.read(buffer,SIZE);
+	qint64 send_len=this->IP->socket->write(buffer,SIZE);
+	this->IP->sended=this->IP->socket->waitForBytesWritten(1000);
+	counts-=send_len;
+}
+file.close();
+```
+
+
+
+#### 3.8.2 图片接收
+
+图片的接收同样通过信息处理槽函数提取分析信号头，再循环接收。具体实现过程与上文中所提到的方式相同，此处不再赘述。
+
+GUI版本相比命令行版本程序可直接显示接收的图片。
+
+对于图片尺寸差异，在这里我将图片按照其大小进行缩放。
+
+- 对于图片宽度超过640像素的图片，将图片的宽度压缩至640，同时高度也按比例压缩；
+
+- 而若图片宽度介于320-640之间，则将其等比例压缩至320像素；
+
+- 对于像素宽度小于320像素的图片，不予压缩，直接显示。
+
+具体操作如下：  
+
+```C++
+else if(strncmp(buffer,"SYS_SIGNAL_IMG:",14)==0)
+{
+	QString cmd=buffer;
+	QStringList cmd_split=cmd.split(":");
+	qint64 counts=cmd_split[2].toLong();
+	std::cout<<"counts="<<counts<<std::endl;
+	QString img_name=cmd_split[1];
+	QFile img(img_name);
+	img.open(QIODevice::WriteOnly);
+	std::cout<<"img opened"<<std::endl;
+	QObject::disconnect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+	while(counts>0)
+	{
+	clear_buf(buffer);
+	IP->recved=IP->socket->waitForReadyRead(1);
+	qint64 recv_len=this->IP->socket->read(buffer,SIZE);
+	img.write(buffer,recv_len);
+	counts-=recv_len;
+	}
+    img.close();
+    QString msg;
+    for(int i=3;i<cmd_split.length()-1;i++)
+    {
+		msg+=cmd_split[i];
+		msg+=":";
+    }
+    this->ui->output->append(msg+"\n");
+    QImage image;
+    image.load(img_name);
+    int w=image.width();
+    int h=image.height();
+    QTextDocumentFragment fragment;
+    if(w>640)
+    {
+        double scale_rate=640.0/w;
+        w=640;
+        h*=scale_rate;
+    }
+    else if(w>320)
+    {
+        double scale_rate=320.0/w;
+        h*=scale_rate;
+        w=320;
+    }
+    fragment = QTextDocumentFragment::fromHtml("<img src='"+img_name+"'width="+QString::number(w)+" height="+QString::number(h)+" />");
+    this->ui->output->textCursor().insertFragment(fragment);
+    this->ui->output->setVisible(true);
+    this->IP->socket->readAll();
+    QObject::connect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+}
+```
+
+#### 3.8.3 文件收发
+
+文件收发操作与上文图片收发类似，区别在于图片不予显示，仅提示保存目录与文件名。
+
+![1557991911030](Socket聊天室.assets/1557991911030.png)
+
+
+
+### 3.9 核心代码展示
+
+#### Chat_Room_Graph.pro
+
+```
+#-------------------------------------------------
+#
+# Project created by QtCreator 2019-04-29T19:21:43
+#
+#-------------------------------------------------
+
+QT       += core gui
+QT       += network
+
+greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
+
+TARGET = Chat_Room_Graph
+TEMPLATE = app
+
+# The following define makes your compiler emit warnings if you use
+# any feature of Qt which has been marked as deprecated (the exact warnings
+# depend on your compiler). Please consult the documentation of the
+# deprecated API in order to know how to port your code away from it.
+DEFINES += QT_DEPRECATED_WARNINGS
+
+# You can also make your code fail to compile if you use deprecated APIs.
+# In order to do so, uncomment the following line.
+# You can also select to disable deprecated APIs only up to a certain version of Qt.
+#DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
+
+CONFIG += c++11
+
+SOURCES += \
+        main.cpp \
+        log_in.cpp \
+    chat_window.cpp \
+    emoji.cpp
+
+HEADERS += \
+        log_in.h \
+    chat_window.h \
+    ip_info.h \
+    emoji.h
+
+FORMS += \
+        log_in.ui \
+    chat_window.ui \
+    emoji.ui
+
+# Default rules for deployment.
+qnx: target.path = /tmp/$${TARGET}/bin
+else: unix:!android: target.path = /opt/$${TARGET}/bin
+!isEmpty(target.path): INSTALLS += target
+
+RC_ICONS=Logo/1.ico
+
+```
+
+#### main.cpp
+
+```C++
+#include "log_in.h"
+#include <QApplication>
+
+int main(int argc, char *argv[])
+{
+    QApplication a(argc, argv);
+    IP_info *IP=new IP_info();
+    Log_in log_in;
+    log_in.IP_assign(IP);
+    log_in.setWindowTitle(" 电子垃圾聊天室");
+    log_in.show();
+
+    return a.exec();
+}
+```
+
+#### ip_info.h
+
+```C++
+#ifndef IP_INFO_H
+#define IP_INFO_H
+#include <QTcpSocket>
+#include <string>
+#include <iostream>
+
+class IP_info
+{
+public:
+    IP_info(unsigned short port)
+    {
+        IP_addr="122.152.205.193";
+        IP_port=port;
+        connected=false;
+        sended=false;
+        recved=false;
+        socket=new QTcpSocket();
+    }
+    IP_info()
+    {
+        IP_addr="122.152.205.193";
+        IP_port=1778;
+        connected=false;
+        sended=false;
+        recved=false;
+        socket=new QTcpSocket();
+    }
+
+    std::string IP_addr;
+    unsigned short IP_port;
+    bool connected;
+    bool sended;
+    bool recved;
+    QTcpSocket *socket;
+};
+#endif // IP_INFO_H
+
+```
+
+#### log_in.h
+
+```C++
 #ifndef LOG_IN_H
 #define LOG_IN_H
 
@@ -1505,10 +2367,9 @@ private:
 };
 
 #endif // LOG_IN_H
-
 ```
 
-##### 3.10.2 log_in.cpp
+#### log_in.cpp
 
 ```C++
 #include "log_in.h"
@@ -1779,7 +2640,7 @@ void Log_in::on_Log_in_but_clicked()//登录按钮
     }
     file_write(this->user_name,this->user_pswd);
     Chat_Window *chat_window=new Chat_Window();
-    chat_window->setWindowTitle(" 电子垃圾聊天室");
+    chat_window->setWindowTitle(" 电子垃圾聊天室-"+user_name);
     chat_window->IP_assign(IP);
     chat_window->show();
     this->close();
@@ -1811,7 +2672,7 @@ void Log_in::on_sign_in_but_clicked()//注册按钮
         return;
     }
     Chat_Window *chat_window=new Chat_Window();
-    chat_window->setWindowTitle(" 电子垃圾聊天室");
+    chat_window->setWindowTitle(" 电子垃圾聊天室-"+user_name);
     chat_window->IP_assign(IP);
     chat_window->show();
     this->close();
@@ -1852,7 +2713,7 @@ void Log_in::on_user_pswd_returnPressed()
 }
 ```
 
-##### 3.10.3 chat_window.h
+#### chat_window.h
 
 ```C++
 #ifndef CHAT_WINDOW_H
@@ -1862,6 +2723,7 @@ void Log_in::on_user_pswd_returnPressed()
 #include <QFile>
 #include "ip_info.h"
 #include "log_in.h"
+#include "emoji.h"
 
 #define SIZE 1024
 
@@ -1887,11 +2749,14 @@ private slots:
 
     void on_img_btn_clicked();
 
+    void on_emoji_btn_clicked();
+
 private:
     Ui::Chat_Window *ui;
     IP_info *IP;
     char *buffer;
     char *buff;
+    bool emoji_flag;
     QString recv_imgs="recv_imgs\\";
     QString recv_files="recv_files\\";
     QString send_imgs="send_imgs\\";
@@ -1901,10 +2766,9 @@ private:
 };
 
 #endif // CHAT_WINDOW_H
-
 ```
 
-##### 3.10.4 chat_window.cpp
+#### chat_window.cpp
 
 ```C++
 #include "chat_window.h"
@@ -1920,6 +2784,10 @@ private:
 #include <string>
 #include <sstream>
 #include <QDateTime>
+#include <QTextDocumentFragment>
+#include <QImage>
+#include <QThread>
+#include <QMouseEvent>
 
 Chat_Window::Chat_Window(QWidget *parent) :
     QMainWindow(parent),
@@ -1928,8 +2796,9 @@ Chat_Window::Chat_Window(QWidget *parent) :
     ui->setupUi(this);
     buff=new char[SIZE];
     buffer=new char[SIZE];
-    this->ui->output->setTextColor("red");
-    this->ui->output->setFontPointSize(11);
+    emoji_flag=false;
+    //this->ui->output->setTextColor("red");
+    //this->ui->output->setFontPointSize(11);
 
     QDir dir;
     if(!dir.exists(recv_imgs))
@@ -1950,7 +2819,6 @@ void Chat_Window::socket_recv()
 {
     clear_buf(buffer);
     IP->socket->read(buffer,SIZE);
-    //this->ui->output->appendPlainText(buffer);
     if(strncmp(buffer,"SYS_SIGNAL_ONLINE_COUNT:",23)==0)
     {
         std::string st=buffer;
@@ -1966,21 +2834,99 @@ void Chat_Window::socket_recv()
     {
         QString cmd=buffer;
         QStringList cmd_split=cmd.split(":");
-        qint64 counts=cmd_split[2].toInt();
+        qint64 counts=cmd_split[2].toLong();
         std::cout<<"counts="<<counts<<std::endl;
-        QString img_name=recv_imgs+cmd_split[1];
+        QString img_name=cmd_split[1];
         QFile img(img_name);
         img.open(QIODevice::WriteOnly);
+        std::cout<<"img opened"<<std::endl;
         QObject::disconnect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
-        while(counts--)
+        while(counts>0)
         {
             clear_buf(buffer);
-            IP->recved=IP->socket->waitForReadyRead(2000);
-            this->IP->socket->read(buffer,SIZE);
-            img.write(buffer,SIZE);
+            IP->recved=IP->socket->waitForReadyRead(1);
+            //QThread::usleep(500);
+            qint64 recv_len=this->IP->socket->read(buffer,SIZE);
+            img.write(buffer,recv_len);
+            counts-=recv_len;
+            //std::cout<<"recv:"<<recv_len<<", remaind Bytes:"<<counts<<std::endl;
         }
         img.close();
+        QString msg;
+        for(int i=3;i<cmd_split.length()-1;i++)
+        {
+            msg+=cmd_split[i];
+            msg+=":";
+        }
+        this->ui->output->append(msg+"\n");
+
+        QImage image;
+        image.load(img_name);
+        int w=image.width();
+        int h=image.height();
+        //std::cout<<"w="<<w<<" h="<<h<<std::endl;
+        QTextDocumentFragment fragment;
+        if(w>640)
+        {
+            double scale_rate=640.0/w;
+            w=640;
+            h*=scale_rate;
+        }
+        fragment = QTextDocumentFragment::fromHtml("<img src='"+img_name+"'width="+QString::number(w)+" height="+QString::number(h)+" />");
+        this->ui->output->textCursor().insertFragment(fragment);
+        this->ui->output->setVisible(true);
+        this->IP->socket->readAll();
         QObject::connect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+    }
+    else if(strncmp(buffer,"SYS_SIGNAL_FILE:",15)==0)
+    {
+        QString cmd=buffer;
+        QStringList cmd_split=cmd.split(":");
+        qint64 counts=cmd_split[2].toLong();
+        std::cout<<"counts="<<counts<<std::endl;
+        QString file_name=cmd_split[1];
+        QFile file(file_name);
+        file.open(QIODevice::WriteOnly);
+        std::cout<<"file opened"<<std::endl;
+        QObject::disconnect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+        while(counts>0)
+        {
+            clear_buf(buffer);
+            IP->recved=IP->socket->waitForReadyRead(1);
+            qint64 recv_len=this->IP->socket->read(buffer,SIZE);
+            file.write(buffer,recv_len);
+            counts-=recv_len;
+        }
+        file.close();
+        QString msg;
+        for(int i=3;i<cmd_split.length();i++)
+        {
+            msg+=cmd_split[i];
+            if(i<cmd_split.length()-1)
+                msg+=":";
+        }
+        this->ui->output->append(msg+"\n");
+
+        this->IP->socket->readAll();
+        QObject::connect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+    }
+    else if(strncmp(buffer,"SYS_SIGNAL_EMOTION:",18)==0)
+    {
+        QString cmd=buffer;
+        QStringList cmd_split=cmd.split(":");
+        QString emoji=cmd_split[1];
+        QString msg;
+        for(int i=2;i<cmd_split.length()-1;i++)
+        {
+            msg+=cmd_split[i];
+            msg+=":";
+        }
+        QString path="emotions\\"+emoji;
+        QTextDocumentFragment fragment;
+        this->ui->output->append(msg+"\n");
+        fragment = QTextDocumentFragment::fromHtml("<img src='"+path+"'/>");
+        this->ui->output->textCursor().insertFragment(fragment);
+        this->ui->output->setVisible(true);
     }
     else
     {
@@ -2043,6 +2989,65 @@ void Chat_Window::on_file_btn_clicked()//文件
     for(auto tmp:fileNames)//获取文件完整路径
     {
         qDebug()<<tmp<<endl;
+        //获取文件信息
+        QFileInfo info(tmp);
+        qint64 file_size=info.size();//字节
+        std::cout<<"img_size="<<(QString::number(file_size/1024.0,10,2)+"KB,").toStdString()<<std::endl;
+        if(file_size/1024/1024>20)//最大不超过20MB
+        {
+            QMessageBox msg;
+            msg.setWindowTitle("提示");
+            QString mesg="所选文件大小为:"+QString::number(file_size/1024.0/1024.0,10,2)+"KB,"+"文件太大无法发送!";
+            msg.setText(mesg);
+            msg.setStyleSheet("font: 8pt;");
+            msg.setIcon((QMessageBox::Information));
+            msg.addButton(tr("确定"),QMessageBox::ActionRole);
+            msg.exec();
+            continue;
+        }
+        qint64 counts=file_size/1024+1;
+        //打开文件
+        QFile file(tmp);
+        if(!file.open(QIODevice::ReadOnly))
+        {
+            QMessageBox msg;
+            msg.setWindowTitle("提示");
+            msg.setText("文件打开错误，请稍后重试！");
+            msg.setStyleSheet("font: 8pt;");
+            msg.setIcon((QMessageBox::Information));
+            msg.addButton(tr("确定"),QMessageBox::ActionRole);
+            msg.exec();
+            continue;
+        }
+        QDataStream read_in(&file);
+        //提取文件名
+        QDateTime Time = QDateTime::currentDateTime();//获取系统现在的时间
+        QString time = Time.toString("yyyy_MM_dd_hh_mm_ss_ddd");
+        QStringList img_name = tmp.split("/");
+        QString fl_name=img_name.last();
+        //QString fl_dump=send_imgs+time+fl_name;
+        //QFile file_dump(fl_dump);
+        //file_dump.open(QIODevice::WriteOnly);
+        std::cout<<fl_name.toStdString()<<std::endl;
+        //发送图片
+        clear_buf(buffer);
+        strcpy(buffer,"SYS_SIGNAL_FILE:");//系统文件发送信号
+        strcat(buffer,(fl_name+":").toStdString().c_str());//图片名
+        strcat(buffer,QString::number(file_size,10).toStdString().c_str());//发送字节数
+        counts=file_size;
+        IP->socket->write(buffer,SIZE);
+        IP->socket->waitForBytesWritten(2000);
+        while(counts>0)
+        {
+            clear_buf(buffer);
+            file.read(buffer,SIZE);
+            qint64 send_len=this->IP->socket->write(buffer,SIZE);
+            this->IP->sended=this->IP->socket->waitForBytesWritten(1000);
+            //file_dump.write(buffer,SIZE);
+            counts-=send_len;
+        }
+        file.close();
+        //file_dump.close();
     }
 }
 
@@ -2065,12 +3070,12 @@ void Chat_Window::on_img_btn_clicked()
         //获取文件信息
         QFileInfo info(tmp);
         qint64 img_size=info.size();//字节
-        std::cout<<"img_size="<<(QString::number((double)img_size/1024,10,2)+"KB,").toStdString()<<std::endl;
-        if(img_size/1024/1024>9)//最大不超过9MB
+        std::cout<<"img_size="<<(QString::number(img_size/1024.0,10,2)+"KB,").toStdString()<<std::endl;
+        if(img_size/1024/1024>5)//最大不超过5MB
         {
             QMessageBox msg;
             msg.setWindowTitle("提示");
-            QString mesg="所选图片大小为:"+QString::number((double)img_size/1024,10,2)+"KB,"+"图片太大无法发送!";
+            QString mesg="所选图片大小为:"+QString::number(img_size/1024.0,10,2)+"KB,"+"图片太大无法发送!";
             msg.setText(mesg);
             msg.setStyleSheet("font: 8pt;");
             msg.setIcon((QMessageBox::Information));
@@ -2093,117 +3098,161 @@ void Chat_Window::on_img_btn_clicked()
             continue;
         }
         QDataStream read_in(&file);
-
         //提取文件名
         QDateTime Time = QDateTime::currentDateTime();//获取系统现在的时间
         QString time = Time.toString("yyyy_MM_dd_hh_mm_ss_ddd");
         QStringList img_name = tmp.split("/");
         QString im_name=img_name.last();
-        QString im_dump=send_imgs+time+im_name;
-        QFile img_dump(im_dump);
-        img_dump.open(QIODevice::WriteOnly);
+        //QString im_dump=send_imgs+time+im_name;
+        //QFile img_dump(im_dump);
+        //img_dump.open(QIODevice::WriteOnly);
         std::cout<<im_name.toStdString()<<std::endl;
         //发送图片
         clear_buf(buffer);
         strcpy(buffer,"SYS_SIGNAL_IMG:");//系统图片发送信号
         strcat(buffer,(im_name+":").toStdString().c_str());//图片名
-        strcat(buffer,QString::number(counts,10).toStdString().c_str());//发送socket次数
+        strcat(buffer,QString::number(img_size,10).toStdString().c_str());//发送字节数
+        counts=img_size;
         IP->socket->write(buffer,SIZE);
         IP->socket->waitForBytesWritten(2000);
-        QObject::disconnect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
-        while(counts--)
+        while(counts>0)
         {
             clear_buf(buffer);
             file.read(buffer,SIZE);
-            this->IP->socket->write(buffer,SIZE);
+            qint64 send_len=this->IP->socket->write(buffer,SIZE);
             this->IP->sended=this->IP->socket->waitForBytesWritten(1000);
-            this->IP->recved=this->IP->socket->waitForReadyRead(1000);
-            this->IP->socket->read(buff,SIZE);
-            img_dump.write(buffer,SIZE);
+            //img_dump.write(buffer,SIZE);
+            counts-=send_len;
         }
         file.close();
-        img_dump.close();
-        QObject::connect(IP->socket,&QTcpSocket::readyRead,this,&Chat_Window::socket_recv);
+        //img_dump.close();
     }
 }
-```
 
-##### 3.10.5 main.cpp
-
-```C++
-#include "log_in.h"
-#include <QApplication>
-
-int main(int argc, char *argv[])
+void Chat_Window::on_emoji_btn_clicked()
 {
-    QApplication a(argc, argv);
-    IP_info *IP=new IP_info();
-    Log_in log_in;
-    log_in.IP_assign(IP);
-    log_in.setWindowTitle(" 电子垃圾聊天室");
-    log_in.show();
-
-    return a.exec();
+    Emoji *emoji=new Emoji();
+    emoji->IP_assign(this->IP);
+    this->ui->emoji_btn->mapToGlobal(this->ui->emoji_btn->pos());
+    int x=this->ui->emoji_btn->mapToGlobal(this->ui->emoji_btn->pos()).x();
+    int y=this->ui->emoji_btn->mapToGlobal(this->ui->emoji_btn->pos()).y();
+    emoji->setGeometry(x-130,y-280,260,280);
+    emoji->show();
 }
 ```
 
-##### 3.10.6 Chat_Room_Graph.pro
+#### emoji.h
 
 ```
-#-------------------------------------------------
-#
-# Project created by QtCreator 2019-04-29T19:21:43
-#
-#-------------------------------------------------
+#ifndef EMOJI_H
+#define EMOJI_H
 
-QT       += core gui
-QT       += network
+#include <QMainWindow>
+#include <chat_window.h>
+#include <ip_info.h>
 
-greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
+namespace Ui {
+class Emoji;
+}
 
-TARGET = Chat_Room_Graph
-TEMPLATE = app
+class Emoji : public QMainWindow
+{
+    Q_OBJECT
 
-# The following define makes your compiler emit warnings if you use
-# any feature of Qt which has been marked as deprecated (the exact warnings
-# depend on your compiler). Please consult the documentation of the
-# deprecated API in order to know how to port your code away from it.
-DEFINES += QT_DEPRECATED_WARNINGS
+public:
+    explicit Emoji(QWidget *parent = nullptr);
+    ~Emoji();
+    void IP_assign(IP_info *IP);
 
-# You can also make your code fail to compile if you use deprecated APIs.
-# In order to do so, uncomment the following line.
-# You can also select to disable deprecated APIs only up to a certain version of Qt.
-#DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
+private slots:
+    void on_tableWidget_cellClicked(int row, int column);
 
-CONFIG += c++11
+private:
+    Ui::Emoji *ui;
+    void addEmoji(QString path);
+    IP_info *IP;
+};
 
-SOURCES += \
-        main.cpp \
-        log_in.cpp \
-    chat_window.cpp
+#endif // EMOJI_H
+```
 
-HEADERS += \
-        log_in.h \
-    chat_window.h \
-    ip_info.h
+#### emoji.cpp
 
-FORMS += \
-        log_in.ui \
-    chat_window.ui
+```C++
+#include "emoji.h"
+#include "ui_emoji.h"
+#include <iostream>
+#include <QTableWidgetItem>
+#include <QTabWidget>
+#include <QLabel>
+#include <QImage>
+#include <QPixmap>
 
-# Default rules for deployment.
-qnx: target.path = /tmp/$${TARGET}/bin
-else: unix:!android: target.path = /opt/$${TARGET}/bin
-!isEmpty(target.path): INSTALLS += target
+Emoji::Emoji(QWidget *parent) :
+    QMainWindow(parent),
+    ui(new Ui::Emoji)
+{
+    ui->setupUi(this);
+    addEmoji("emotions\\%1.png");
+}
 
-RC_ICONS=Logo/1.ico
+Emoji::~Emoji()
+{
+    delete ui;
+}
+
+void Emoji::IP_assign(IP_info *IP)
+{
+    this->IP=IP;
+}
+
+void Emoji::addEmoji(QString path)
+{
+    this->setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    ui->tableWidget->setFocusPolicy(Qt::NoFocus);
+
+    for(int i=0;i<8;i++)
+        for(int j=0;j<8;j++)
+        {
+            QTableWidgetItem* tableWidgetItem = new QTableWidgetItem;
+            this->ui->tableWidget->setItem(j,i,tableWidgetItem);
+
+            QLabel *emoji_icon=new QLabel();
+            emoji_icon->setMargin(2);
+            QImage *img=new QImage();
+            img->load(path.arg(i+8*j+1));
+            QPixmap pixmap = QPixmap::fromImage(*img);
+            QPixmap fitpixmap = pixmap.scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation);  // 按比例缩放
+            emoji_icon->setPixmap(fitpixmap);
+            this->ui->tableWidget->setCellWidget(j,i,emoji_icon);
+        }
+}
+
+void Emoji::on_tableWidget_cellClicked(int row, int column)
+{
+    std::cout<<"row="<<row<<" column="<<column<<std::endl;
+    QString mesg="SYS_SIGNAL_EMOTION:%1.png";
+    char buffer[SIZE];
+    strcpy(buffer,mesg.arg(column+1+8*row).toStdString().c_str());
+    this->IP->socket->write(buffer,SIZE);
+    this->IP->sended=this->IP->socket->waitForBytesWritten(2000);
+    this->close();
+}
 ```
 
 
 
-#### 3.11 版本控制
+### 3.10 版本控制
 
+| 版本号 |    时间    |                 修改                  |
+| :----: | :--------: | :-----------------------------------: |
+|  V1.0  | 2019/04/29 | 搭建Qwidget窗口界面，实现文本信息收发 |
+|  V1.1  | 2019/05/01 |      重设界面布局；改进显示方案       |
+|  V1.2  | 2019/05/04 |      增加并完善在线人数显示功能       |
+|  V1.3  | 2019/05/09 |           增加图片收发功能            |
+|  V1.4  | 2019/05/12 |           增加图片显示功能            |
+|  V1.5  | 2019/05/15 |           增加文件收发功能            |
+|  V1.6  | 2019/05/16 |        增加表情显示及收发功能         |
+|  V2.0  | 2019/05/20 |        修复部分Bug，发布正式版        |
 
-
-
-
+项目详见：[GitHub](<https://github.com/ZWMDR/chat_room_graph>)
